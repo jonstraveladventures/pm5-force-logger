@@ -1,0 +1,2 @@
+bleak>=0.22          # Bluetooth Low Energy (macOS, Windows, Linux)
+python-dotenv>=1.0   # only for the optional Concept2 Logbook upload
