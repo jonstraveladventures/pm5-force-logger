@@ -14,6 +14,11 @@ saves all of it and shows it live in a browser.
 Before recording: close ErgData (or any other rowing app) and wake the PM5. The PM5 accepts
 one app connection at a time and stops advertising while anything holds it.
 
+Recording stops 75 s after the PM5's end-of-workout summary (which it re-sends with the
+recovery heart rate after a minute), 10 min after the last stroke, when a second piece is
+started on the monitor, or on Ctrl+C. Every stop saves the session. One piece per run: if a
+second piece starts, the first is saved and the logger exits; run it again for the next.
+
 On macOS, run it from Terminal (or iTerm). macOS kills a process that uses Bluetooth under an
 app without Bluetooth permission (you'll see exit code 134, "abort"); Terminal asks for the
 permission the first time. --replay and --reparse don't use Bluetooth.
@@ -31,6 +36,7 @@ import argparse
 import asyncio
 import json
 import os
+import signal
 import sys
 import time
 import webbrowser
@@ -47,11 +53,15 @@ UUID = lambda short: BASE.format(short)
 ROWING_SERVICE = UUID(0x0030)
 DEVICE_INFO = {0x0011: "model", 0x0012: "serial", 0x0013: "hardware_rev",
                0x0014: "firmware_rev", 0x0015: "manufacturer"}
-IDLE_STOP_S = 300          # stop after 5 min with no notifications
+IDLE_STOP_S = 600          # stop 10 min after the last stroke (the PM5 sends status every second while awake)
 AFTER_END_S = 75           # the PM5 re-sends its summary with recovery HR after 1 min of rest
+CURVE_MATCH_S = 3.0        # a force curve belongs to the stroke record within this many seconds
 
-WORKOUT_STATE = {0: "wait_to_begin", 1: "workout_row", 10: "workout_end", 11: "terminate",
-                 12: "workout_logged", 13: "rearm"}
+WORKOUT_STATE = {0: "wait_to_begin", 1: "workout_row", 2: "countdown_pause", 3: "interval_rest",
+                 4: "interval_work_time", 5: "interval_work_distance",
+                 6: "interval_rest_end_to_work_time", 7: "interval_rest_end_to_work_distance",
+                 8: "interval_work_time_to_rest", 9: "interval_work_distance_to_rest",
+                 10: "workout_end", 11: "terminate", 12: "workout_logged", 13: "rearm"}
 
 
 def u16(b, i):
@@ -71,7 +81,7 @@ def parse(short: int, b: bytes) -> dict | None:
                     "stroke_state": b[10], "drag_factor": b[18]}
         if short == 0x0032 and len(b) >= 16:
             return {"elapsed_s": u24(b, 0) / 100, "speed_ms": u16(b, 3) / 1000,
-                    "stroke_rate": b[5], "hr": None if b[6] == 255 else b[6],
+                    "stroke_rate": b[5], "hr": None if b[6] in (0, 255) else b[6],
                     "pace_s": u16(b, 7) / 100, "avg_pace_s": u16(b, 9) / 100}
         if short == 0x0033 and len(b) >= 14:
             return {"elapsed_s": u24(b, 0) / 100, "avg_power_w": u16(b, 4),
@@ -133,14 +143,20 @@ class Session:
     end and is dropped. Force curves come on two channels: 0x003D (documented; time-stepped, so
     each reading repeats 2-3 times, with leading zeros) and 0x0043 (not in spec rev 1.30, sent by
     2026 firmware just after 0x003D; same packet scheme, one point per reading).
-    `emit(kind, data)` feeds the live dashboard."""
+
+    A session holds one piece. Stroke counts restart at 1 when a new piece starts on the
+    monitor, so a count that has already been recorded and is below the latest one means a new
+    piece: `new_piece_at` is set and further strokes are ignored (the raw log still has them).
+    A count equal to the latest, however late, is the second copy of that stroke: a rower who
+    pauses mid-piece produces exactly that. `emit(kind, data)` feeds the live dashboard."""
 
     CURVES = {0x003D: "force_curve", 0x0043: "force_curve_v2"}
 
     def __init__(self, echo=False, emit=None):
         self.strokes, self.unmatched, self.summary, self.status = {}, [], {}, {}
         self.fc = {k: ForceCurve() for k in self.CURVES}
-        self.end_at, self.echo, self.emit = None, echo, emit or (lambda kind, data: None)
+        self.max_count, self.last_stroke_t, self.end_at, self.new_piece_at = 0, None, None, None
+        self.echo, self.emit = echo, emit or (lambda kind, data: None)
 
     def feed(self, t: float, short: int, b: bytes):
         if short in self.CURVES:
@@ -152,23 +168,10 @@ class Session:
         if not p:
             return
         if short == 0x0035:
-            n = p["stroke_count"]
-            if n == 0:
-                return
-            if n in self.strokes:
-                self.strokes[n]["recovery_time_s"] = p["recovery_time_s"]
-                self.emit("stroke_update", {"stroke_count": n, "recovery_time_s": p["recovery_time_s"]})
-                return
-            self.strokes[n] = {"t": round(t, 3), **p, "hr": self.status.get("hr"),
-                               "spm": self.status.get("stroke_rate"), "pace_s": self.status.get("pace_s"),
-                               "recovery_time_s": None}   # filled by this stroke's second copy
-            self.emit("stroke", self.strokes[n])
-            if self.echo:
-                print(f"stroke {n:4d}  {p['distance_m']:7.1f} m  peak {p['peak_force_lbf']:5.1f} lbf  "
-                      f"drive {p['drive_length_m']:.2f} m / {p['drive_time_s']:.2f} s", flush=True)
+            self._stroke(t, p)
             return
         if short == 0x0036:
-            if p["stroke_count"] in self.strokes:
+            if p["stroke_count"] in self.strokes and self.new_piece_at is None:
                 self.strokes[p["stroke_count"]]["power_w"] = p["power_w"]
                 self.emit("stroke_update", {"stroke_count": p["stroke_count"], "power_w": p["power_w"]})
             self.status.update(power_w=p["power_w"], projected_time_s=p.get("projected_time_s"),
@@ -197,15 +200,46 @@ class Session:
             return
         self.emit("status", self.status)
 
+    def _stroke(self, t: float, p: dict):
+        n = p["stroke_count"]
+        if n == 0 or self.new_piece_at is not None:
+            return
+        self.last_stroke_t = t
+        if n in self.strokes:
+            if n < self.max_count - 1:   # counts went backwards: the PM5 started a new piece
+                self.new_piece_at = t
+                self.emit("new_piece", {"t": round(t, 3)})
+                if self.echo:
+                    print("a new piece started on the PM5. This run records one piece, so the first is "
+                          "being saved now; run the logger again for the next.", flush=True)
+                return
+            self.strokes[n]["recovery_time_s"] = p["recovery_time_s"]
+            self.emit("stroke_update", {"stroke_count": n, "recovery_time_s": p["recovery_time_s"]})
+            return
+        self.max_count = max(self.max_count, n)
+        s = self.strokes[n] = {"t": round(t, 3), **p, "hr": self.status.get("hr"),
+                               "spm": self.status.get("stroke_rate"), "pace_s": self.status.get("pace_s"),
+                               "recovery_time_s": None}   # filled by this stroke's second copy
+        for c in list(self.unmatched):   # a curve that arrived just before its stroke record
+            if c["kind"] not in s and abs(c["t"] - t) < CURVE_MATCH_S:
+                s[c["kind"]] = c["points"]
+                self.unmatched.remove(c)
+        self.emit("stroke", s)
+        if self.echo:
+            print(f"stroke {n:4d}  {p['distance_m']:7.1f} m  peak {p['peak_force_lbf']:5.1f} lbf  "
+                  f"drive {p['drive_length_m']:.2f} m / {p['drive_time_s']:.2f} s", flush=True)
+
     def _attach_curve(self, t, key, points):
+        if self.new_piece_at is not None:
+            return
         # each curve arrives just after its drive, beside that stroke's first 0x0035
-        free = [s for s in self.strokes.values() if key not in s and abs(s["t"] - t) < 3]
+        free = [s for s in self.strokes.values() if key not in s and abs(s["t"] - t) < CURVE_MATCH_S]
         if free:
             s = min(free, key=lambda s: abs(s["t"] - t))
             s[key] = points
             self.emit("curve", {"stroke_count": s["stroke_count"], "key": key, "points": points})
         else:
-            self.unmatched.append({"kind": key, "t": t, "points": points})
+            self.unmatched.append({"kind": key, "t": round(t, 3), "points": points})
 
     def snapshot(self) -> dict:
         return {"status": self.status, "summary": self.summary,
@@ -214,7 +248,8 @@ class Session:
     def result(self, meta: dict) -> dict:
         return {**meta, "last_status": self.status, "summary": self.summary,
                 "strokes": [self.strokes[k] for k in sorted(self.strokes)],
-                "unmatched_curves": self.unmatched}
+                "unmatched_curves": self.unmatched,
+                "new_piece_started": self.new_piece_at is not None}
 
 
 class Hub:
@@ -247,24 +282,40 @@ class Hub:
                         await writer.drain()
                 finally:
                     self.clients.discard(q)
-            else:
+            elif path in ("/", "/index.html"):
                 body = DASHBOARD.read_bytes()
                 writer.write(b"HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n"
                              b"Cache-Control: no-cache\r\nContent-Length: %d\r\n\r\n" % len(body) + body)
                 await writer.drain()
-        except (ConnectionError, asyncio.CancelledError):
+            else:
+                writer.write(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n")
+                await writer.drain()
+        except Exception:  # a dropped tab or a malformed request; nothing to report
             pass
         finally:
             writer.close()
 
 
 async def start_dashboard(hub: Hub, open_browser: bool):
-    server = await asyncio.start_server(hub.handle, "127.0.0.1", PORT)
+    try:
+        server = await asyncio.start_server(hub.handle, "127.0.0.1", PORT)
+    except OSError as e:
+        sys.exit(f"can't open the dashboard on port {PORT} ({e.strerror}). "
+                 f"Is another logger still running? Use --port to pick another port.")
     url = f"http://localhost:{PORT}"
     print(f"dashboard: {url}", flush=True)
     if open_browser:
         webbrowser.open(url)
     return server
+
+
+def install_stop_signal(stop: asyncio.Event) -> None:
+    """Make Ctrl+C set `stop` so the session is saved on the way out. Not available on Windows,
+    where Ctrl+C raises KeyboardInterrupt at the current await instead (handled in main)."""
+    try:
+        asyncio.get_running_loop().add_signal_handler(signal.SIGINT, stop.set)
+    except (NotImplementedError, RuntimeError):
+        pass
 
 
 def is_pm5(d, ad) -> bool:
@@ -353,45 +404,58 @@ async def log_session(minutes: float | None, upload: bool = True, open_browser: 
     start = datetime.now().strftime("%Y-%m-%d_%H%M%S")
     (OUT / "raw").mkdir(parents=True, exist_ok=True)
     raw_path, sess_path = OUT / "raw" / f"{start}.jsonl", OUT / "sessions" / f"{start}.json"
-    session, last = Session(echo=True, emit=hub.publish), {"t": time.time()}
+    session, stop = Session(echo=True, emit=hub.publish), asyncio.Event()
     hub.session = session
     raw = raw_path.open("a")
 
     def on_notify(short):
         def handler(_char, data: bytearray):
+            if raw.closed:
+                return
             now = time.time()
-            last["t"] = now
             raw.write(json.dumps({"t": round(now, 3), "uuid": f"{short:04x}", "hex": bytes(data).hex()}) + "\n")
             session.feed(now, short, bytes(data))
         return handler
 
-    async with BleakClient(dev) as client:
-        info = await read_info(client)
-        raw.write(json.dumps({"t": round(time.time(), 3), "device": {"name": dev.name, **info}}) + "\n")
-        hub.publish("device", {"name": dev.name, **info})
-        print(f"connected to {dev.name}: firmware {info.get('firmware_rev')}", flush=True)
-        service = client.services.get_service(ROWING_SERVICE)
-        subscribed = []
-        for ch in service.characteristics:  # everything, including characteristics newer than the spec
-            if "notify" in ch.properties:
-                short = int(ch.uuid[4:8], 16)
-                await client.start_notify(ch, on_notify(short))
-                subscribed.append(f"{short:04x}")
-        print("subscribed:", " ".join(subscribed), "| row when ready; end the piece on the PM5 (Menu)",
-              flush=True)
-        deadline = time.time() + minutes * 60 if minutes else None
-        try:
-            while client.is_connected:
-                await asyncio.sleep(1)
-                now = time.time()
-                if session.end_at and now - session.end_at > AFTER_END_S:
-                    break
-                if now - last["t"] > IDLE_STOP_S or (deadline and now > deadline):
-                    break
-        except (KeyboardInterrupt, asyncio.CancelledError):
-            pass
-    raw.close()
+    install_stop_signal(stop)
+    try:
+        async with BleakClient(dev) as client:
+            info = await read_info(client)
+            raw.write(json.dumps({"t": round(time.time(), 3), "device": {"name": dev.name, **info}}) + "\n")
+            hub.publish("device", {"name": dev.name, **info})
+            print(f"connected to {dev.name}: firmware {info.get('firmware_rev')}", flush=True)
+            service = client.services.get_service(ROWING_SERVICE)
+            if service is None:
+                sys.exit(f"{dev.name} does not offer the Concept2 rowing service; is it a PM5?")
+            subscribed = []
+            for ch in service.characteristics:  # everything, including characteristics newer than the spec
+                if "notify" in ch.properties:
+                    short = int(ch.uuid[4:8], 16)
+                    await client.start_notify(ch, on_notify(short))
+                    subscribed.append(f"{short:04x}")
+            print("subscribed:", " ".join(subscribed), "| row when ready; end the piece on the PM5 (Menu)",
+                  flush=True)
+            connected_at = time.time()
+            deadline = connected_at + minutes * 60 if minutes else None
+            try:
+                while client.is_connected and not stop.is_set():
+                    await asyncio.sleep(1)
+                    now = time.time()
+                    if session.end_at and now - session.end_at > AFTER_END_S:
+                        break
+                    if session.new_piece_at:
+                        break
+                    if now - (session.last_stroke_t or connected_at) > IDLE_STOP_S:
+                        print("no strokes for 10 minutes; stopping", flush=True)
+                        break
+                    if deadline and now > deadline:
+                        break
+            except (KeyboardInterrupt, asyncio.CancelledError):
+                pass
+    finally:
+        raw.close()
     hub.publish("ended", {"session": start})
+    await asyncio.sleep(0.3)   # let the dashboard receive it before the server goes
     data = session.result({"started": start, "device": {"name": dev.name, **info}})
     save(sess_path, data)
     if upload:
@@ -399,14 +463,16 @@ async def log_session(minutes: float | None, upload: bool = True, open_browser: 
     server.close()
 
 
-def read_raw(raw_path: Path):
+def read_raw(raw_path):
+    raw_path = Path(raw_path)
     meta, events = {"started": raw_path.stem}, []
-    for line in raw_path.open():
-        r = json.loads(line)
-        if "device" in r:
-            meta["device"] = r["device"]
-        elif "uuid" in r:
-            events.append((r["t"], int(r["uuid"], 16), bytes.fromhex(r["hex"])))
+    with raw_path.open() as f:
+        for line in f:
+            r = json.loads(line)
+            if "device" in r:
+                meta["device"] = r["device"]
+            elif "uuid" in r:
+                events.append((r["t"], int(r["uuid"], 16), bytes.fromhex(r["hex"])))
     return meta, events
 
 
@@ -421,14 +487,17 @@ def reparse(raw_path: Path) -> None:
 async def replay(raw_path: Path, speed: float, loop: bool, open_browser: bool):
     """Play a saved row through the dashboard at its original pace (x speed). No Bluetooth."""
     meta, events = read_raw(raw_path)
-    hub = Hub()
+    hub, stop = Hub(), asyncio.Event()
     server = await start_dashboard(hub, open_browser)
+    install_stop_signal(stop)
     await asyncio.sleep(2)  # let a freshly opened tab connect before the first stroke
-    while True:
+    while not stop.is_set():
         hub.session = Session(emit=hub.publish)
         hub.publish("reset", {"replay": raw_path.stem, **meta.get("device", {})})
         prev = events[0][0] if events else 0
         for t, short, b in events:
+            if stop.is_set():
+                break
             await asyncio.sleep(max(0.0, (t - prev) / speed))
             prev = t
             hub.session.feed(t, short, b)
@@ -436,7 +505,7 @@ async def replay(raw_path: Path, speed: float, loop: bool, open_browser: bool):
         if not loop:
             break
         await asyncio.sleep(3)
-    await asyncio.sleep(1)
+    await asyncio.sleep(0.5)
     server.close()
 
 
@@ -469,7 +538,7 @@ async def main():
             name = d.name or ad.local_name
             if name or is_pm5(d, ad):
                 print(f"{'PM5 ->' if is_pm5(d, ad) else '      '} {name or '(no name)'}  rssi {ad.rssi}  "
-                      f"services {[u[:8] for u in ad.service_uuids]}")
+                      f"services {[u[:8] for u in (ad.service_uuids or [])]}")
         if not any(is_pm5(d, ad) for d, ad in seen.values()):
             print(f"no PM5 advertising ({len(seen)} Bluetooth devices seen)")
         return

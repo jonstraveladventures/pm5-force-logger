@@ -3,8 +3,9 @@
 No real rower data is in it. It encodes made-up but plausible values in the same packet
 formats a PM5 sends (spec rev 1.30 layouts, plus the 0x0043 force-curve channel), so
 `python pm5_logger.py --replay examples/sample_row.jsonl` exercises the full parsing path.
-About 3 minutes of rowing at ~22 strokes/min: the peak drifts later and a small dip at the
-leg-to-back handover appears as the rower "tires", so the shape measures have something to show.
+About 3 minutes of rowing at ~22 strokes/min. Early strokes meet the dashboard's shape targets;
+as the rower "tires" the peak drifts later, the catch loads more slowly, the curve flattens and
+a small dip appears at the leg-to-back handover, so the shape measures have something to show.
 
     python examples/make_sample.py
 """
@@ -29,11 +30,11 @@ def curve(peak_pos, blip, peak):
     pts = []
     for i in range(34):
         x = i / 33
-        a = 2.2
+        a = 1.0                                               # a fast rise, so the catch gradient starts in range
         b = a * (1 - peak_pos) / peak_pos                     # mode of x^a (1-x)^b sits at peak_pos
         f = (x / peak_pos) ** a * ((1 - x) / (1 - peak_pos)) ** b if 0 < x < 1 else 0.0
-        if blip:
-            f -= blip * math.exp(-((x - (peak_pos - 0.12)) / 0.04) ** 2)
+        if blip:   # a narrow dip on the rise, 18% of the drive before the peak: the leg-to-back handover
+            f -= blip * math.exp(-((x - (peak_pos - 0.18)) / 0.04) ** 2)
         pts.append(max(0, round(peak * min(f, 1.0) + random.uniform(-1.5, 1.5))))
     return pts
 
@@ -70,9 +71,9 @@ def main():
         cycle = 60 / spm
         drive_t = random.gauss(0.82, 0.03)
         rec_t = cycle - drive_t
-        peak = random.gauss(112 - 8 * tired, 3)
         pts = curve(peak_pos=0.36 + 0.14 * tired + random.gauss(0, 0.02),
-                    blip=0.10 * max(0, tired - 0.5) * 2, peak=peak)
+                    blip=0.25 * max(0, tired - 0.5) * 2, peak=random.gauss(112 - 8 * tired, 3))
+        peak = max(pts)                 # the PM5 reports the curve's own maximum as the stroke's peak force
         avg_f = sum(pts) / len(pts)
         stroke_dist = random.gauss(9.6, 0.2)
         # drive: status ticks, then end-of-drive stroke data, power and the two curves

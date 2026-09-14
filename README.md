@@ -32,7 +32,9 @@ You need a PM5 with Bluetooth, a computer with Bluetooth LE and Python 3.10 or n
 2. Wake the PM5 by pressing a button.
 3. Run `python pm5_logger.py`. It finds the PM5, connects to it and opens the dashboard.
 4. Row, then end the piece on the monitor with the Menu button. The PM5 sends its end-of-workout summary only when the piece is ended on the monitor.
-5. The logger stops 75 seconds later, when the PM5 sends the summary again with your recovery heart rate. It also stops after 5 minutes without data, or when you press Ctrl+C.
+5. The logger stops 75 seconds later, when the PM5 sends the summary again with your recovery heart rate. It also stops 10 minutes after the last stroke, or when you press Ctrl+C. Every way of stopping saves the session.
+
+It records one piece per run. Stroke counts restart at 1 when you start another piece on the monitor, so if that happens the logger saves the first piece and exits; run it again for the next one. Pausing mid-piece is fine.
 
 On macOS, run the logger from Terminal or iTerm. The first run asks for Bluetooth permission. macOS kills a Bluetooth program started from an app without Bluetooth permission, and all you see is exit code 134.
 
@@ -96,6 +98,8 @@ Comparing with yourself is more useful. After a row that felt right, press "Save
 
 The logger will then post each finished row to your Logbook, together with its stroke data. It posts only rows that the PM5 ended properly, and only Just Row, fixed-distance and fixed-time pieces. Interval workouts aren't supported yet. It never posts the same session twice, and the Logbook refuses duplicates anyway. To check a row before it is posted, or to retry one, run `python pm5_upload.py data/sessions/<start>.json --dry-run`.
 
+The row is dated by the time it ended, in your computer's timezone as read from `/etc/localtime` or the `TZ` environment variable. Where neither is available, on Windows for instance, it is dated in UTC and labelled as such.
+
 Concept2 issues a new refresh token every time one is used and cancels the old token, so `concept2.py` saves each new token back to `.env`. If you ever see "The refresh token is invalid", run `python concept2.py auth` again.
 
 ## Notes on the PM5's Bluetooth data
@@ -109,6 +113,18 @@ The published specification doesn't make the following behaviour obvious:
 - Heart rate reaches this data only when a heart-rate monitor is paired with the PM5 itself.
 
 So far this has been tested on one PM5, running firmware 178.069. Other PM5 versions and firmware may behave differently. The raw log means that anything decoded wrongly can be fixed afterwards.
+
+## Tests
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+The tests build packets by hand from the specification's byte layouts, check the force-curve reassembly and the merging of the two stroke-data copies, and run the synthetic sample through the same parser the logger uses live. They need no Bluetooth or network, and run on every push through GitHub Actions.
+
+## How this was built
+
+Jonathan Shock built this with Claude, Anthropic's AI model, working in Claude Code. Claude wrote the code, the dashboard, the tests and the first draft of this README, from Concept2's published specification, the PM5's own Bluetooth traffic and the sources below. The decoding was checked against a real PM5 and the rest against synthetic data. If you find something wrong, please open an issue.
 
 ## Sources
 

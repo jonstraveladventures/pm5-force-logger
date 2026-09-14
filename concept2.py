@@ -15,6 +15,7 @@ the saved token was lost; run `python concept2.py auth` again.
 """
 import json
 import os
+import secrets
 import sys
 import urllib.error
 import urllib.parse
@@ -37,10 +38,14 @@ SCOPES = "user:read,results:write"   # write implies read; a refresh asking for 
 REDIRECT = os.environ.get("CONCEPT2_REDIRECT_URI", "http://localhost:8766")
 
 
+class NotConfigured(RuntimeError):
+    pass
+
+
 def _env(key: str) -> str:
     val = os.environ.get(key)
     if not val:
-        sys.exit(f"{key} is not set. Copy .env.example to .env and fill it in (see concept2.py).")
+        raise NotConfigured(f"{key} is not set. Copy .env.example to .env and fill it in (see concept2.py).")
     return val
 
 
@@ -48,25 +53,35 @@ def _save_env(key: str, value: str) -> None:
     lines = ENV.read_text().splitlines() if ENV.exists() else []
     lines = [l for l in lines if not l.startswith(f"{key}=")] + [f"{key}={value}"]
     ENV.write_text("\n".join(lines) + "\n")
+    try:
+        os.chmod(ENV, 0o600)   # it holds your client secret and refresh token
+    except OSError:
+        pass
     os.environ[key] = value
 
 
 def _token_request(data: dict) -> dict:
     body = urllib.parse.urlencode(data).encode()
-    return json.loads(urllib.request.urlopen(urllib.request.Request(TOKEN_URL, data=body)).read())
+    try:
+        return json.loads(urllib.request.urlopen(urllib.request.Request(TOKEN_URL, data=body)).read())
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode(errors="replace")[:300]
+        raise RuntimeError(f"Concept2 token request failed (HTTP {e.code}): {detail}") from None
 
 
 def auth() -> None:
     """Browser OAuth flow; saves CONCEPT2_REFRESH_TOKEN to .env."""
     cid, secret = _env("CONCEPT2_CLIENT_ID"), _env("CONCEPT2_CLIENT_SECRET")
-    url = (f"{AUTHORIZE_URL}?client_id={cid}&response_type=code"
-           f"&redirect_uri={urllib.parse.quote(REDIRECT, safe='')}&scope={urllib.parse.quote(SCOPES, safe='')}")
+    state = secrets.token_urlsafe(16)
+    url = (f"{AUTHORIZE_URL}?client_id={urllib.parse.quote(cid, safe='')}&response_type=code"
+           f"&redirect_uri={urllib.parse.quote(REDIRECT, safe='')}&scope={urllib.parse.quote(SCOPES, safe='')}"
+           f"&state={state}")
     got = {}
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
             qs = parse_qs(urlparse(self.path).query)
-            if "code" in qs:
+            if "code" in qs and qs.get("state") == [state]:
                 got["code"] = qs["code"][0]
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html")
@@ -131,9 +146,12 @@ def whoami() -> None:
 
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else ""
-    if cmd == "auth":
-        auth()
-    elif cmd == "whoami":
-        whoami()
-    else:
-        sys.exit("usage: python concept2.py auth | whoami")
+    try:
+        if cmd == "auth":
+            auth()
+        elif cmd == "whoami":
+            whoami()
+        else:
+            sys.exit("usage: python concept2.py auth | whoami")
+    except RuntimeError as e:
+        sys.exit(str(e))

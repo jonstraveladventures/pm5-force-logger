@@ -95,8 +95,9 @@ const TARGETS = {  // Kleshnev (2011), Biomechanics of Rowing, via biomex.studio
   a100: { lo: 0, hi: 40, label: "≤40%" }, a70: { lo: 0, hi: 17, label: "≤17%" },
   d70: { lo: 28, hi: 40, label: "28–40%" }, ram: { lo: 38, hi: 64, label: "38–64%" }, dips: { lo: 0, hi: 0, label: "none" },
 };
-// Reference shape built to meet those targets (A100 40%, A70 ~15%, D70 ~33%, Ra-m ~62%). A template, not a measured curve.
-const KLESHNEV_PTS = [[0,0],[.05,.35],[.15,.72],[.25,.9],[.4,1],[.55,.93],[.73,.7],[.85,.45],[.95,.15],[1,0]];
+// Reference shape built to meet those targets. Scored by metrics() below it gives peak position 33%,
+// catch gradient 13%, finish plateau 33%, rectangle index 61% (tests/test_logger.py checks this). A template, not a measured curve.
+const KLESHNEV_PTS = [[0,0],[.06,.4],[.18,.85],[.36,1],[.66,.72],[.8,.25],[.92,.1],[1,0]];
 
 // ---------- curve maths ----------
 function trim(p) { if (!p || p.length < 3) return null; let a = 0, b = p.length - 1; while (a < b && p[a] <= 0) a++; while (b > a && p[b] <= 0) b--; return b - a >= 2 ? p.slice(a, b + 1) : null; }
@@ -269,6 +270,7 @@ const H = {
   stroke_update: d => { const s = S.strokes.get(d.stroke_count); if (s) Object.assign(s, d); },
   curve: d => { const s = S.strokes.get(d.stroke_count); if (s) s[d.key] = d.points; },
   summary: d => { S.summary = d; },
+  new_piece: () => { document.getElementById("banner").textContent = "a new piece started on the PM5: this session is being saved; run the logger again for the next piece"; },
   ended: d => { document.getElementById("banner").textContent = `session ${d.session} ended and saved`; },
 };
 function connect() {

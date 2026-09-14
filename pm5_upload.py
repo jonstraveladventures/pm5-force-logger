@@ -19,6 +19,12 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
+try:  # .env holds CONCEPT2_WEIGHT_CLASS; load it before any payload is built
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).resolve().parent / ".env")
+except ImportError:
+    pass
+
 # PM5 workout-type enum (BLE spec rev 1.30 appendix) -> Logbook workout_type
 WORKOUT_TYPES = {0: "JustRow", 1: "JustRow", 2: "FixedDistanceSplits", 3: "FixedDistanceSplits",
                  4: "FixedTimeSplits", 5: "FixedTimeSplits"}
@@ -96,6 +102,8 @@ def upload_session(path, dry_run: bool = False):
     if sess.get("logbook_id"):
         print(f"already in the Logbook as result {sess['logbook_id']}")
         return sess["logbook_id"]
+    if sess.get("new_piece_started"):
+        print("note: a second piece started during this run; only the first piece is in this file")
     payload = build_payload(sess)
     print(f"Logbook: {payload['distance']} m in {payload['time'] / 10:.1f} s, "
           f"{len(payload['stroke_data'])} strokes, dated {payload['date']} {payload['timezone']}")
