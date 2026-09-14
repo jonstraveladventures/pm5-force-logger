@@ -17,6 +17,7 @@ import json
 import os
 import secrets
 import sys
+import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -50,13 +51,20 @@ def _env(key: str) -> str:
 
 
 def _save_env(key: str, value: str) -> None:
+    """Rewrite one KEY in .env atomically: a temp file renamed over the original, so a
+    crash mid-write can't leave a truncated .env with every credential gone."""
     lines = ENV.read_text().splitlines() if ENV.exists() else []
     lines = [l for l in lines if not l.startswith(f"{key}=")] + [f"{key}={value}"]
-    ENV.write_text("\n".join(lines) + "\n")
+    fd, tmp = tempfile.mkstemp(prefix=".env.", dir=ROOT)
     try:
-        os.chmod(ENV, 0o600)   # it holds your client secret and refresh token
-    except OSError:
-        pass
+        with os.fdopen(fd, "w") as f:
+            f.write("\n".join(lines) + "\n")
+        os.chmod(tmp, 0o600)   # it holds your client secret and refresh token
+        os.replace(tmp, ENV)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
     os.environ[key] = value
 
 

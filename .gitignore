@@ -1,6 +1,7 @@
 # your rows and your credentials stay on your machine
 data/
 .env
+.env.*
 __pycache__/
 .venv/
 *.pyc
