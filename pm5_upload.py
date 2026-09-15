@@ -73,6 +73,13 @@ def build_payload(sess: dict) -> dict:
         data.append(row)
     hr = {k: v for k, v in (("average", s.get("avg_hr")), ("min", s.get("min_hr")), ("max", s.get("max_hr")),
                             ("ending", s.get("ending_hr")), ("recovery", s.get("recovery_hr"))) if v and v != 255}
+    # The PM5's end-of-workout summary leaves average/min/max HR at 0 even when a belt or watch
+    # broadcast was paired (only the ending HR is filled), so take them from the strokes instead.
+    beats = [st["hr"] for st in strokes if st.get("hr") and st["hr"] != 255]
+    if beats:
+        hr.setdefault("average", round(sum(beats) / len(beats)))
+        hr.setdefault("min", min(beats))
+        hr.setdefault("max", max(beats))
     tz = local_tz()   # unknown zone: send UTC time labelled UTC, never local time labelled UTC
     when = datetime.fromtimestamp(end) if tz else datetime.fromtimestamp(end, timezone.utc)
     payload = {
