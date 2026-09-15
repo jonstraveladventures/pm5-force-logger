@@ -4,7 +4,7 @@ Record every stroke from a Concept2 PM5 over Bluetooth, including its force curv
 
 The Concept2 Logbook keeps the time, distance, pace, stroke rate and heart rate for each stroke, but not its force. ErgData shows the force curve while you row but, as far as I can tell, doesn't save it. The PM5 sends more than either keeps: drive length and time, recovery time, peak and average force, work per stroke, and the full force curve for every stroke. This project saves all of that data, shows it live and scores the shape of each force curve against published technique targets.
 
-![Thirty seconds of the dashboard during a row](docs/dashboard.gif)
+![Thirty seconds of the dashboard during a row](docs/dashboard-row.gif)
 
 *Thirty seconds of one of my own 5 km rows, replayed at twice its speed.*
 
