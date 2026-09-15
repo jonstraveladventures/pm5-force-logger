@@ -8,50 +8,67 @@
   :root {
     --surface: #1a1a19; --panel: #232322; --grid: #3a3a38; --ink: #ffffff; --ink2: #c3c2b7; --ink3: #8d8c84;
     --s1: #3987e5; --s2: #d95926; --s3: #199e70; --good: #3aa655; --warn: #d9a300;
+    --text: 1; --curve-h: 270px; --curve-w: 56%;   /* the Display sliders set these; saved per browser */
   }
+  html { font-size: calc(17px * var(--text)); }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--surface); color: var(--ink); font: 17px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  body { margin: 0; background: var(--surface); color: var(--ink); font: 1rem/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
   header { display: flex; align-items: baseline; gap: 16px; padding: 12px 20px 4px; }
-  header h1 { font-size: 18px; font-weight: 600; margin: 0; }
-  #conn { font-size: 13px; color: var(--ink3); }
+  header h1 { font-size: 1.06rem; font-weight: 600; margin: 0; }
+  #conn { font-size: .76rem; color: var(--ink3); }
   #conn.live { color: var(--good); }
-  #banner { margin-left: auto; font-size: 13px; color: var(--ink2); }
-  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: 10px; padding: 8px 20px; }
+  #banner { margin-left: auto; font-size: .76rem; color: var(--ink2); }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(calc(128px * var(--text)), 1fr)); gap: 10px; padding: 8px 20px; }
   .tile { background: var(--panel); border-radius: 10px; padding: 10px 12px; }
-  .tile .label { font-size: 14px; color: var(--ink3); text-transform: uppercase; letter-spacing: .04em; }
-  .tile .value { font-size: clamp(28px, 2.9vw, 44px); font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.1; margin-top: 2px; white-space: nowrap; }
-  .tile .sub { font-size: 15px; color: var(--ink2); font-variant-numeric: tabular-nums; }
+  .tile .label { font-size: .82rem; color: var(--ink3); text-transform: uppercase; letter-spacing: .04em; }
+  .tile .value { font-size: clamp(1.65rem, calc(2.9vw * var(--text)), 2.6rem); font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.1; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: clip; }
+  .tile .sub { font-size: .88rem; color: var(--ink2); font-variant-numeric: tabular-nums; }
   /* the curve is a shape check; the numbers beside it are what gets read from the seat, so they get the room */
-  main { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(380px, 1fr); gap: 12px; padding: 4px 20px 12px; }
+  main { display: grid; grid-template-columns: var(--curve-w) minmax(0, 1fr); gap: 12px; padding: 4px 20px 12px; }
   .panel { background: var(--panel); border-radius: 10px; padding: 12px 14px; min-width: 0; }
-  .panel h2 { font-size: 18px; font-weight: 600; margin: 0 0 8px; color: var(--ink2); }
-  .row { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; font-size: 14px; color: var(--ink2); }
+  .panel h2 { font-size: 1.06rem; font-weight: 600; margin: 0 0 8px; color: var(--ink2); }
+  .row { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; font-size: .82rem; color: var(--ink2); }
   .legend span { display: inline-flex; align-items: center; gap: 6px; margin-right: 12px; }
   .swatch { width: 18px; height: 0; border-top: 3px solid; display: inline-block; }
   .swatch.dash { border-top-style: dashed; }
   canvas { width: 100%; display: block; }
-  #curve { height: 270px; }
-  .metrics { display: grid; grid-template-columns: 1fr auto auto; gap: 6px 14px; font-size: 20px; align-items: baseline; }
-  .metrics .v { font-size: 30px; font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; }
-  .metrics .t { font-size: 16px; color: var(--ink3); }
-  .metrics .note { grid-column: 1 / -1; font-size: 15px; color: var(--ink3); margin: -2px 0 8px; }
-  .flag { font-size: 16px; font-weight: 600; }
+  #curve { height: var(--curve-h); }
+  .metrics { display: grid; grid-template-columns: 1fr auto auto; gap: 6px 14px; font-size: 1.18rem; align-items: baseline; }
+  .metrics .v { font-size: 1.76rem; font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; }
+  .metrics .t { font-size: .94rem; color: var(--ink3); }
+  .metrics .note { grid-column: 1 / -1; font-size: .88rem; color: var(--ink3); margin: -2px 0 8px; }
+  .flag { font-size: .94rem; font-weight: 600; }
   .flag.ok { color: var(--good); } .flag.off { color: var(--warn); }
   .trends { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; padding: 0 20px 12px; }
   .trends canvas { height: 120px; }
-  table { width: 100%; border-collapse: collapse; font-size: 15px; font-variant-numeric: tabular-nums; }
+  table { width: 100%; border-collapse: collapse; font-size: .88rem; font-variant-numeric: tabular-nums; }
   th, td { text-align: right; padding: 4px 7px; border-bottom: 1px solid var(--grid); }
   th:first-child, td:first-child { text-align: left; }
   th { color: var(--ink3); font-weight: 500; }
   .tablewrap { overflow-x: auto; padding: 0 20px 20px; }
-  button, select { background: #2f2f2d; color: var(--ink); border: 1px solid var(--grid); border-radius: 6px; padding: 4px 8px; font: inherit; font-size: 13px; cursor: pointer; }
-  #hover { font-size: 14px; color: var(--ink2); min-height: 18px; font-variant-numeric: tabular-nums; }
+  button, select { background: #2f2f2d; color: var(--ink); border: 1px solid var(--grid); border-radius: 6px; padding: 4px 8px; font: inherit; font-size: .76rem; cursor: pointer; }
+  #display { margin-left: 12px; font-size: .76rem; color: var(--ink2); }
+  #display summary { cursor: pointer; list-style: none; color: var(--ink3); }
+  #display[open] summary { color: var(--ink2); }
+  #display .sliders { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; padding: 6px 0 0; }
+  #display label { display: inline-flex; gap: 6px; align-items: center; white-space: nowrap; }
+  #display input[type=range] { width: 110px; }
+
+  #hover { font-size: .82rem; color: var(--ink2); min-height: 18px; font-variant-numeric: tabular-nums; }
   @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  header { flex-wrap: wrap; }
 </style>
 </head>
 <body>
 <header>
-  <h1>PM5 Live</h1><span id="conn">connecting…</span><span id="banner"></span>
+  <h1>PM5 Live</h1><span id="conn">connecting…</span>
+  <details id="display"><summary>Display ▾</summary><div class="sliders">
+    <label>Text <input type="range" id="ui_text" min="0.7" max="2" step="0.05"> <span id="ui_text_v"></span></label>
+    <label>Curve height <input type="range" id="ui_h" min="140" max="640" step="10"> <span id="ui_h_v"></span></label>
+    <label>Curve width <input type="range" id="ui_w" min="30" max="80" step="1"> <span id="ui_w_v"></span></label>
+    <button id="ui_reset">Reset</button>
+  </div></details>
+  <span id="banner"></span>
 </header>
 
 <section class="tiles" id="tiles"></section>
@@ -155,6 +172,7 @@ function renderTiles() {
 // ---------- charts ----------
 function setupCanvas(c) { const dpr = window.devicePixelRatio || 1, w = c.clientWidth, h = c.clientHeight; if (c.width !== w * dpr || c.height !== h * dpr) { c.width = w * dpr; c.height = h * dpr; } const g = c.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, h); return [g, w, h]; }
 const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const canvasFont = () => `${Math.round(11 * (parseFloat(css("--text")) || 1))}px -apple-system, sans-serif`;
 const src = () => document.getElementById("src").value;
 const refKey = () => document.getElementById("refsel").value;
 const KLESHNEV = fromControl(KLESHNEV_PTS);
@@ -172,7 +190,7 @@ function drawCurve() {
   const avg = meanCurve(series.map(m => m.norm));
   const ymax = Math.max(40, ...list.slice(-9).map(s => Math.max(...trim(s[src()])))) * 1.1;
   // grid + axes
-  g.strokeStyle = css("--grid"); g.lineWidth = 1; g.fillStyle = css("--ink3"); g.font = "11px -apple-system, sans-serif";
+  g.strokeStyle = css("--grid"); g.lineWidth = 1; g.fillStyle = css("--ink3"); g.font = canvasFont();
   for (let f = 0; f <= ymax; f += ymax > 150 ? 50 : 25) { const y = pad.t + ph - f / ymax * ph; g.beginPath(); g.moveTo(pad.l, y); g.lineTo(w - pad.r, y); g.stroke(); g.fillText(`${f}`, 8, y + 4); }
   g.textAlign = "center";
   for (let p = 0; p <= 100; p += 20) g.fillText(`${p}%`, pad.l + p / 100 * pw, pad.t + ph + 16);
@@ -227,7 +245,7 @@ function drawTrends() {
   TRENDS.forEach(([name, fn, band], i) => {
     const c = document.getElementById("tr" + i); const [g, w, h] = setupCanvas(c); const pad = { l: 34, r: 8, t: 6, b: 18 };
     const pts = list.map(s => [s.stroke_count, fn(s)]).filter(p => p[1] != null && !Number.isNaN(p[1]));
-    g.fillStyle = css("--ink3"); g.font = "11px -apple-system, sans-serif";
+    g.fillStyle = css("--ink3"); g.font = canvasFont();
     if (!pts.length) { g.fillText("no strokes yet", pad.l, h / 2); return; }
     let lo = Math.min(...pts.map(p => p[1])), hi = Math.max(...pts.map(p => p[1])); if (band) { lo = Math.min(lo, band.lo); hi = Math.max(hi, band.hi); }
     const span = hi - lo || 1; const floor0 = lo >= 0; lo -= span * .1; hi += span * .1; if (floor0) lo = Math.max(0, lo);
@@ -252,6 +270,27 @@ function renderTable() {
 let pending = false;
 function render() { if (pending) return; pending = true; requestAnimationFrame(() => { pending = false; renderTiles(); drawCurve(); renderMetrics(); drawTrends(); renderTable(); }); }
 window.addEventListener("resize", render);
+// ---------- display sliders: text size, curve height and width; remembered per browser ----------
+const UI = { text: ["--text", 1, v => `${Math.round(v * 100)}%`, v => v],
+             h: ["--curve-h", 270, v => `${v} px`, v => `${v}px`],
+             w: ["--curve-w", 56, v => `${v}%`, v => `${v}%`] };
+function loadUI() { try { return JSON.parse(localStorage.getItem("pm5_display")) || {}; } catch { return {}; } }
+function applyUI(save = true) {
+  const cur = {};
+  for (const [k, [prop, dflt, show, cssv]] of Object.entries(UI)) {
+    const el = document.getElementById("ui_" + k); const v = parseFloat(el.value); cur[k] = v;
+    document.documentElement.style.setProperty(prop, cssv(v)); document.getElementById(`ui_${k}_v`).textContent = show(v);
+  }
+  if (save) { try { localStorage.setItem("pm5_display", JSON.stringify(cur)); } catch {} }
+  render();
+}
+function initUI() {
+  const saved = loadUI();
+  for (const [k, [, dflt]] of Object.entries(UI)) { const el = document.getElementById("ui_" + k); el.value = saved[k] ?? dflt; el.addEventListener("input", () => applyUI()); }
+  document.getElementById("ui_reset").addEventListener("click", () => { for (const [k, [, dflt]] of Object.entries(UI)) document.getElementById("ui_" + k).value = dflt; applyUI(); });
+  applyUI(false);
+}
+initUI();
 document.getElementById("src").addEventListener("change", render);
 document.getElementById("refsel").addEventListener("change", render);
 document.getElementById("saveref").addEventListener("click", () => {
