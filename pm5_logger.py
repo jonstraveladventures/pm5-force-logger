@@ -9,6 +9,7 @@ saves all of it and shows it live in a browser.
     python pm5_logger.py --info            # model, serial, firmware, then disconnect
     python pm5_logger.py                   # record a session; dashboard at http://localhost:8750
     python pm5_logger.py --workout 4x4:00/3:00r   # program the piece on the PM5 first (see pm5_workouts.py)
+                                           # (the dashboard has the same controls, so no terminal typing is needed)
     python pm5_logger.py --replay examples/sample_row.jsonl --loop   # try the dashboard, no rower needed
     python pm5_logger.py --reparse data/raw/<start>.jsonl            # rebuild a session file
 
@@ -254,22 +255,57 @@ class Session:
 
 
 class Hub:
-    """Fan-out of dashboard events to every open browser tab (server-sent events)."""
+    """Fan-out of dashboard events to every open browser tab (server-sent events), plus the
+    small JSON API the dashboard uses to program the PM5: GET /workouts lists the named pieces,
+    POST /program {"spec": "4x4:00/3:00r"} programs one (or {"terminate": true} clears it)
+    through the logger's own Bluetooth connection, so nothing has to be typed in a terminal."""
 
     def __init__(self):
         self.clients, self.session = set(), None
+        self.programmer = None   # async fn(spec text or None) -> description; set while a PM5 is connected
 
     def publish(self, kind, data):
         msg = f"data: {json.dumps({'kind': kind, 'data': data})}\n\n".encode()
         for q in list(self.clients):
             q.put_nowait(msg)
 
+    def _json(self, writer, status: int, payload: dict):
+        body = json.dumps(payload).encode()
+        reason = {200: "OK", 400: "Bad Request", 404: "Not Found", 502: "Bad Gateway", 503: "Service Unavailable"}
+        writer.write(f"HTTP/1.1 {status} {reason.get(status, 'OK')}\r\nContent-Type: application/json\r\n"
+                     f"Cache-Control: no-cache\r\nContent-Length: {len(body)}\r\n\r\n".encode() + body)
+
+    async def program(self, body: bytes) -> tuple[int, dict]:
+        try:
+            req = json.loads(body or b"{}")
+        except json.JSONDecodeError:
+            return 400, {"error": "the request was not JSON"}
+        if not self.programmer:
+            return 503, {"error": "no PM5 connected: this is a replay, or the logger has not connected yet"}
+        try:
+            if req.get("terminate"):
+                await self.programmer(None)
+                return 200, {"ok": True, "workout": None}
+            spec = str(req.get("spec") or "").strip()
+            if not spec:
+                return 400, {"error": "choose a workout or type one, e.g. 4x4:00/3:00r"}
+            desc = await self.programmer(spec)
+            return 200, {"ok": True, "workout": desc}
+        except ValueError as e:
+            return 400, {"error": str(e)}
+        except (RuntimeError, TimeoutError) as e:
+            return 502, {"error": str(e)}
+
     async def handle(self, reader, writer):
         try:
             request = (await reader.readline()).split()
+            method = request[0].decode() if request else "GET"
             path = request[1].decode() if len(request) > 1 else "/"
-            while (await reader.readline()) not in (b"\r\n", b"\n", b""):
-                pass
+            length = 0
+            while (line := await reader.readline()) not in (b"\r\n", b"\n", b""):
+                if line.lower().startswith(b"content-length:"):
+                    length = int(line.split(b":", 1)[1])
+            body = await reader.readexactly(length) if length else b""
             if path.startswith("/events"):
                 writer.write(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n"
                              b"Cache-Control: no-cache\r\nConnection: keep-alive\r\n\r\n")
@@ -283,10 +319,19 @@ class Hub:
                         await writer.drain()
                 finally:
                     self.clients.discard(q)
+            elif path == "/workouts":
+                from pm5_workouts import describe, load_named
+                self._json(writer, 200, {"workouts": [{"name": n, "description": describe(w)}
+                                                      for n, w in load_named().items()]})
+                await writer.drain()
+            elif path == "/program" and method == "POST":
+                status, payload = await self.program(body)
+                self._json(writer, status, payload)
+                await writer.drain()
             elif path in ("/", "/index.html"):
-                body = DASHBOARD.read_bytes()
+                page = DASHBOARD.read_bytes()
                 writer.write(b"HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n"
-                             b"Cache-Control: no-cache\r\nContent-Length: %d\r\n\r\n" % len(body) + body)
+                             b"Cache-Control: no-cache\r\nContent-Length: %d\r\n\r\n" % len(page) + page)
                 await writer.drain()
             else:
                 writer.write(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n")
@@ -435,6 +480,22 @@ async def log_session(minutes: float | None, upload: bool = True, open_browser: 
                           flush=True)
             raw.write(json.dumps({"t": round(time.time(), 3), **meta}) + "\n")
             hub.publish("device", {**meta["device"], "workout": meta.get("workout")})
+
+            async def programmer(spec_text):
+                """Called by the dashboard's Send / Clear buttons (Hub.program)."""
+                from pm5_workouts import describe, parse_spec, program, terminate
+                if spec_text is None:
+                    await terminate(client)
+                    desc = None
+                else:
+                    spec = parse_spec(spec_text)
+                    await program(client, spec)
+                    desc = describe(spec)
+                meta["workout"] = desc
+                raw.write(json.dumps({"t": round(time.time(), 3), "workout": desc}) + "\n")
+                hub.publish("device", {**meta["device"], "workout": desc})
+                return desc
+            hub.programmer = programmer
             service = client.services.get_service(ROWING_SERVICE)
             if service is None:
                 sys.exit(f"{dev.name} does not offer the Concept2 rowing service; is it a PM5?")
@@ -464,10 +525,11 @@ async def log_session(minutes: float | None, upload: bool = True, open_browser: 
             except (KeyboardInterrupt, asyncio.CancelledError):
                 pass
     finally:
+        hub.programmer = None
         raw.close()
     hub.publish("ended", {"session": start})
     await asyncio.sleep(0.3)   # let the dashboard receive it before the server goes
-    data = session.result({"started": start, **meta})
+    data = session.result({"started": start, **{k: v for k, v in meta.items() if v is not None}})
     save(sess_path, data)
     if upload:
         post(sess_path, data)
@@ -482,9 +544,12 @@ def read_raw(raw_path):
             r = json.loads(line)
             if "device" in r:
                 meta["device"] = r["device"]
-                if r.get("workout"):
+            if "workout" in r:           # programmed at connect, or later from the dashboard
+                if r["workout"]:
                     meta["workout"] = r["workout"]
-            elif "uuid" in r:
+                else:
+                    meta.pop("workout", None)
+            if "uuid" in r:
                 events.append((r["t"], int(r["uuid"], 16), bytes.fromhex(r["hex"])))
     return meta, events
 

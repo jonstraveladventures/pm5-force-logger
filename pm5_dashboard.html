@@ -18,10 +18,10 @@
   #conn { font-size: .76rem; color: var(--ink3); }
   #conn.live { color: var(--good); }
   #banner { margin-left: auto; font-size: .76rem; color: var(--ink2); }
-  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(calc(128px * var(--text)), 1fr)); gap: 10px; padding: 8px 20px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(calc(150px * var(--text)), 1fr)); gap: 10px; padding: 8px 20px; }
   .tile { background: var(--panel); border-radius: 10px; padding: 10px 12px; }
   .tile .label { font-size: .82rem; color: var(--ink3); text-transform: uppercase; letter-spacing: .04em; }
-  .tile .value { font-size: clamp(1.65rem, calc(2.9vw * var(--text)), 2.6rem); font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.1; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: clip; }
+  .tile .value { font-size: clamp(1.5rem, calc(2.5vw * var(--text)), 2.4rem); font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.1; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: clip; }
   .tile .sub { font-size: .88rem; color: var(--ink2); font-variant-numeric: tabular-nums; }
   /* the curve is a shape check; the numbers beside it are what gets read from the seat, so they get the room */
   main { display: grid; grid-template-columns: var(--curve-w) minmax(0, 1fr); gap: 12px; padding: 4px 20px 12px; }
@@ -53,6 +53,11 @@
   #display .sliders { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; padding: 6px 0 0; }
   #display label { display: inline-flex; gap: 6px; align-items: center; white-space: nowrap; }
   #display input[type=range] { width: 110px; }
+  .setup { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; padding: 6px 20px 2px; font-size: .82rem; color: var(--ink2); }
+  .setup select { max-width: 24em; }
+  .setup input[type=text] { background: #2f2f2d; color: var(--ink); border: 1px solid var(--grid); border-radius: 6px; padding: 4px 8px; font: inherit; font-size: .82rem; width: 15em; }
+  .setup .primary { background: var(--s1); border-color: var(--s1); color: #fff; }
+  #wo_status { font-size: .82rem; } #wo_status.ok { color: var(--good); } #wo_status.err { color: var(--warn); }
 
   #hover { font-size: .82rem; color: var(--ink2); min-height: 18px; font-variant-numeric: tabular-nums; }
   @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
@@ -70,6 +75,15 @@
   </div></details>
   <span id="banner"></span>
 </header>
+
+<section class="setup" id="setup">
+  <span>Set up the PM5:</span>
+  <label>named <select id="wo_named"><option value="">choose…</option></select></label>
+  <label>or type <input type="text" id="wo_spec" placeholder="4x4:00/3:00r · 5000m/1000m · 20:00" title="distance (2000m), time (20:00), splits after a slash, NxWORK/RESTr for intervals, @pace"></label>
+  <button id="wo_send" class="primary">Send to PM5</button>
+  <button id="wo_clear" title="End the programmed piece on the monitor">Clear</button>
+  <span id="wo_status"></span>
+</section>
 
 <section class="tiles" id="tiles"></section>
 
@@ -299,6 +313,24 @@ document.getElementById("saveref").addEventListener("click", () => {
   localStorage.setItem("pm5_my_reference", JSON.stringify(avg)); document.getElementById("refsel").value = "mine";
   document.getElementById("banner").textContent = `saved the average of ${series.length} strokes as your reference`; render();
 });
+
+// ---------- set up the PM5 from the page ----------
+async function loadWorkouts() {
+  try { const r = await fetch("/workouts"); const j = await r.json(); const sel = document.getElementById("wo_named");
+    j.workouts.forEach(w => { const o = document.createElement("option"); o.value = w.name; o.textContent = `${w.name} · ${w.description}`; sel.appendChild(o); }); } catch {}
+}
+async function sendProgram(payload) {
+  const st = document.getElementById("wo_status"); st.className = ""; st.textContent = payload.terminate ? "clearing…" : "sending to the PM5…";
+  try { const r = await fetch("/program", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }); const j = await r.json();
+    if (r.ok) { st.className = "ok"; st.textContent = j.workout ? `PM5 set: ${j.workout}. Row when ready.` : "cleared"; }
+    else { st.className = "err"; st.textContent = j.error || `error ${r.status}`; } }
+  catch (e) { st.className = "err"; st.textContent = "the logger is not reachable"; }
+}
+document.getElementById("wo_named").addEventListener("change", e => { document.getElementById("wo_spec").value = e.target.value; });
+document.getElementById("wo_send").addEventListener("click", () => { const spec = document.getElementById("wo_spec").value.trim(); if (!spec) { document.getElementById("wo_status").textContent = "choose a workout or type one"; return; } sendProgram({ spec }); });
+document.getElementById("wo_spec").addEventListener("keydown", e => { if (e.key === "Enter") document.getElementById("wo_send").click(); });
+document.getElementById("wo_clear").addEventListener("click", () => sendProgram({ terminate: true }));
+loadWorkouts();
 
 // ---------- live feed ----------
 const H = {
