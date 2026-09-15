@@ -6,6 +6,8 @@ The Concept2 Logbook keeps the time, distance, pace, stroke rate and heart rate 
 
 ![Thirty seconds of the dashboard during a row](docs/dashboard.gif)
 
+*Thirty seconds of one of my own 5 km rows, replayed at twice its speed.*
+
 ## What you get
 
 - A live dashboard at `http://localhost:8750`. It shows time, distance, pace, stroke rate, power, heart rate, peak force, drive length and time, drive-to-recovery ratio, distance and work per stroke, drag factor and calories. It also shows the force curve for your latest stroke, your last eight strokes, your session average and a reference shape, along with curve-shape measures against their targets, stroke-by-stroke trends and a table of recent strokes. Text size and the size of the curve are adjustable from the page, and the page can set up the workout on the PM5 (see below).
@@ -22,7 +24,7 @@ pip install -r requirements.txt
 python pm5_logger.py --replay examples/sample_row.jsonl --loop --speed 4
 ```
 
-Your browser opens the dashboard and plays about three minutes of rowing. The sample is synthetic and was made by `examples/make_sample.py` in the same packet format that a PM5 sends. No real rower's data is in this repository.
+Your browser opens the dashboard and plays about three minutes of rowing. The sample is synthetic and was made by `examples/make_sample.py` in the same packet format that a PM5 sends. The only real rowing data in this repository is the animation above.
 
 ## Record a session
 
