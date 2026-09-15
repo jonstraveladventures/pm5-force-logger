@@ -4,11 +4,11 @@ Record every stroke from a Concept2 PM5 over Bluetooth, including its force curv
 
 The Concept2 Logbook keeps the time, distance, pace, stroke rate and heart rate for each stroke, but not its force. ErgData shows the force curve while you row but, as far as I can tell, doesn't save it. The PM5 sends more than either keeps: drive length and time, recovery time, peak and average force, work per stroke, and the full force curve for every stroke. This project saves all of that data, shows it live and scores the shape of each force curve against published technique targets.
 
-![Dashboard](docs/dashboard.png)
+![Thirty seconds of the dashboard during a row](docs/dashboard.gif)
 
 ## What you get
 
-- A live dashboard at `http://localhost:8750`. It shows time, distance, pace, stroke rate, power, heart rate, peak force, drive length and time, drive-to-recovery ratio, distance and work per stroke, drag factor and calories. It also shows the force curve for your latest stroke, your last eight strokes, your session average and a reference shape, along with curve-shape measures against their targets, stroke-by-stroke trends and a table of recent strokes.
+- A live dashboard at `http://localhost:8750`. It shows time, distance, pace, stroke rate, power, heart rate, peak force, drive length and time, drive-to-recovery ratio, distance and work per stroke, drag factor and calories. It also shows the force curve for your latest stroke, your last eight strokes, your session average and a reference shape, along with curve-shape measures against their targets, stroke-by-stroke trends and a table of recent strokes. Text size and the size of the curve are adjustable from the page, and the page can set up the workout on the PM5 (see below).
 - Every stroke saved to disk: a raw log of every Bluetooth message and a session file with one record per stroke, including both force curves.
 - An optional upload to your Concept2 Logbook. ErgData cannot connect while this script holds the PM5's Bluetooth connection, so nothing else would send the row to the Logbook.
 
@@ -51,7 +51,7 @@ Keep your PM5's firmware up to date through ErgData. Concept2's March 2026 firmw
 
 ## Program a workout
 
-The logger can program the piece on the PM5 before recording, as ErgData does, so you can leave your phone in another room:
+The logger can program the piece on the PM5, as ErgData does, so you can leave your phone in another room. The easiest way is from the dashboard: once the logger has connected, choose a named workout or type one in the "Set up the PM5" bar and press Send to PM5; the monitor goes to its "prepare to row" screen, and Clear ends the piece. The same works from the command line:
 
 ```bash
 python pm5_logger.py --workout 5000m/1000m      # single distance with 1000 m splits, then record
