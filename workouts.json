@@ -1,0 +1,14 @@
+{
+  "_comment": "Named workouts for `pm5_workouts.py NAME` and `pm5_logger.py --workout NAME`. Keys: distance_m / time_s / calories with an optional split_m / split_s / split_cal; `interval` (one work/rest pair repeated until you stop); `intervals` (a list, optional `repeat`); `rest_s` per interval, omit it for rest that ends when you start rowing; `pace_s` is a target pace in seconds per 500 m; `just_row` with an optional split_m.",
+  "2k": {"distance_m": 2000, "split_m": 500},
+  "5k": {"distance_m": 5000, "split_m": 1000},
+  "10k": {"distance_m": 10000, "split_m": 2000},
+  "20min": {"time_s": 1200, "split_s": 240},
+  "30min": {"time_s": 1800, "split_s": 300},
+  "4x4": {"intervals": [{"time_s": 240, "rest_s": 180}], "repeat": 4},
+  "8x500": {"intervals": [{"distance_m": 500, "rest_s": 60}], "repeat": 8},
+  "pyramid": {"intervals": [{"distance_m": 250, "rest_s": 60}, {"distance_m": 500, "rest_s": 90},
+                            {"distance_m": 750, "rest_s": 120}, {"distance_m": 500, "rest_s": 90},
+                            {"distance_m": 250, "rest_s": 60}]},
+  "just_row": {"just_row": true, "split_m": 500}
+}

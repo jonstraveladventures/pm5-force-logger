@@ -8,6 +8,7 @@ saves all of it and shows it live in a browser.
     python pm5_logger.py --scan            # is a PM5 advertising nearby?
     python pm5_logger.py --info            # model, serial, firmware, then disconnect
     python pm5_logger.py                   # record a session; dashboard at http://localhost:8750
+    python pm5_logger.py --workout 4x4:00/3:00r   # program the piece on the PM5 first (see pm5_workouts.py)
     python pm5_logger.py --replay examples/sample_row.jsonl --loop   # try the dashboard, no rower needed
     python pm5_logger.py --reparse data/raw/<start>.jsonl            # rebuild a session file
 
@@ -393,7 +394,8 @@ def post(sess_path: Path, data: dict) -> None:
         print(f"Logbook upload failed ({e}); the row is saved. Retry: python pm5_upload.py {rel(sess_path)}")
 
 
-async def log_session(minutes: float | None, upload: bool = True, open_browser: bool = True):
+async def log_session(minutes: float | None, upload: bool = True, open_browser: bool = True,
+                      workout: dict | None = None):
     from bleak import BleakClient
     hub = Hub()
     server = await start_dashboard(hub, open_browser)
@@ -421,9 +423,18 @@ async def log_session(minutes: float | None, upload: bool = True, open_browser: 
     try:
         async with BleakClient(dev) as client:
             info = await read_info(client)
-            raw.write(json.dumps({"t": round(time.time(), 3), "device": {"name": dev.name, **info}}) + "\n")
-            hub.publish("device", {"name": dev.name, **info})
+            meta = {"device": {"name": dev.name, **info}}
             print(f"connected to {dev.name}: firmware {info.get('firmware_rev')}", flush=True)
+            if workout:
+                from pm5_workouts import describe, program
+                try:
+                    await program(client, workout)
+                    meta["workout"] = describe(workout)
+                except (RuntimeError, TimeoutError, ValueError) as e:
+                    print(f"{e}\nThe workout was not set; recording anyway. Set it on the monitor by hand.",
+                          flush=True)
+            raw.write(json.dumps({"t": round(time.time(), 3), **meta}) + "\n")
+            hub.publish("device", {**meta["device"], "workout": meta.get("workout")})
             service = client.services.get_service(ROWING_SERVICE)
             if service is None:
                 sys.exit(f"{dev.name} does not offer the Concept2 rowing service; is it a PM5?")
@@ -456,7 +467,7 @@ async def log_session(minutes: float | None, upload: bool = True, open_browser: 
         raw.close()
     hub.publish("ended", {"session": start})
     await asyncio.sleep(0.3)   # let the dashboard receive it before the server goes
-    data = session.result({"started": start, "device": {"name": dev.name, **info}})
+    data = session.result({"started": start, **meta})
     save(sess_path, data)
     if upload:
         post(sess_path, data)
@@ -471,6 +482,8 @@ def read_raw(raw_path):
             r = json.loads(line)
             if "device" in r:
                 meta["device"] = r["device"]
+                if r.get("workout"):
+                    meta["workout"] = r["workout"]
             elif "uuid" in r:
                 events.append((r["t"], int(r["uuid"], 16), bytes.fromhex(r["hex"])))
     return meta, events
@@ -514,6 +527,9 @@ async def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--scan", action="store_true", help="list advertising PM5s and exit")
     ap.add_argument("--info", action="store_true", help="read device info (firmware) and exit")
+    ap.add_argument("--workout", metavar="SPEC",
+                    help="program this piece on the PM5 before recording: 2000m, 20:00/4:00, 4x4:00/3:00r, "
+                         "or a name from workouts.json (python pm5_workouts.py --list)")
     ap.add_argument("--minutes", type=float, help="stop recording after this many minutes")
     ap.add_argument("--no-upload", action="store_true", help="don't post the row to the Concept2 Logbook")
     ap.add_argument("--no-browser", action="store_true", help="don't open the dashboard automatically")
@@ -525,6 +541,14 @@ async def main():
     ap.add_argument("--port", type=int, default=PORT, help="dashboard port (default 8750)")
     a = ap.parse_args()
     OUT, PORT = (a.out or OUT).resolve(), a.port
+    workout = None
+    if a.workout:   # check the syntax before touching Bluetooth
+        from pm5_workouts import build, parse_spec
+        try:
+            workout = parse_spec(a.workout)
+            build(workout)
+        except ValueError as e:
+            sys.exit(str(e))
     if a.reparse:
         reparse(a.reparse)
         return
@@ -549,7 +573,7 @@ async def main():
         async with BleakClient(dev) as client:
             print(json.dumps({"name": dev.name, **await read_info(client)}, indent=1))
         return
-    await log_session(a.minutes, upload=not a.no_upload, open_browser=not a.no_browser)
+    await log_session(a.minutes, upload=not a.no_upload, open_browser=not a.no_browser, workout=workout)
 
 
 if __name__ == "__main__":

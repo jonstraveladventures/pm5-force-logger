@@ -10,7 +10,7 @@
     --s1: #3987e5; --s2: #d95926; --s3: #199e70; --good: #3aa655; --warn: #d9a300;
   }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--surface); color: var(--ink); font: 15px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  body { margin: 0; background: var(--surface); color: var(--ink); font: 17px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
   header { display: flex; align-items: baseline; gap: 16px; padding: 12px 20px 4px; }
   header h1 { font-size: 18px; font-weight: 600; margin: 0; }
   #conn { font-size: 13px; color: var(--ink3); }
@@ -18,33 +18,34 @@
   #banner { margin-left: auto; font-size: 13px; color: var(--ink2); }
   .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: 10px; padding: 8px 20px; }
   .tile { background: var(--panel); border-radius: 10px; padding: 10px 12px; }
-  .tile .label { font-size: 12px; color: var(--ink3); text-transform: uppercase; letter-spacing: .04em; }
-  .tile .value { font-size: clamp(22px, 2.3vw, 34px); font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.1; margin-top: 2px; white-space: nowrap; }
-  .tile .sub { font-size: 12px; color: var(--ink2); font-variant-numeric: tabular-nums; }
-  main { display: grid; grid-template-columns: minmax(0, 2.2fr) minmax(300px, 1fr); gap: 12px; padding: 4px 20px 12px; }
+  .tile .label { font-size: 14px; color: var(--ink3); text-transform: uppercase; letter-spacing: .04em; }
+  .tile .value { font-size: clamp(28px, 2.9vw, 44px); font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.1; margin-top: 2px; white-space: nowrap; }
+  .tile .sub { font-size: 15px; color: var(--ink2); font-variant-numeric: tabular-nums; }
+  /* the curve is a shape check; the numbers beside it are what gets read from the seat, so they get the room */
+  main { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(380px, 1fr); gap: 12px; padding: 4px 20px 12px; }
   .panel { background: var(--panel); border-radius: 10px; padding: 12px 14px; min-width: 0; }
-  .panel h2 { font-size: 14px; font-weight: 600; margin: 0 0 6px; color: var(--ink2); }
-  .row { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; font-size: 13px; color: var(--ink2); }
+  .panel h2 { font-size: 18px; font-weight: 600; margin: 0 0 8px; color: var(--ink2); }
+  .row { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; font-size: 14px; color: var(--ink2); }
   .legend span { display: inline-flex; align-items: center; gap: 6px; margin-right: 12px; }
   .swatch { width: 18px; height: 0; border-top: 3px solid; display: inline-block; }
   .swatch.dash { border-top-style: dashed; }
   canvas { width: 100%; display: block; }
-  #curve { height: 380px; }
-  .metrics { display: grid; grid-template-columns: 1fr auto auto; gap: 4px 12px; font-size: 14px; align-items: baseline; }
-  .metrics .v { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; }
-  .metrics .t { font-size: 12px; color: var(--ink3); }
-  .metrics .note { grid-column: 1 / -1; font-size: 12px; color: var(--ink3); margin: -2px 0 6px; }
-  .flag { font-size: 12px; font-weight: 600; }
+  #curve { height: 270px; }
+  .metrics { display: grid; grid-template-columns: 1fr auto auto; gap: 6px 14px; font-size: 20px; align-items: baseline; }
+  .metrics .v { font-size: 30px; font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; }
+  .metrics .t { font-size: 16px; color: var(--ink3); }
+  .metrics .note { grid-column: 1 / -1; font-size: 15px; color: var(--ink3); margin: -2px 0 8px; }
+  .flag { font-size: 16px; font-weight: 600; }
   .flag.ok { color: var(--good); } .flag.off { color: var(--warn); }
   .trends { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; padding: 0 20px 12px; }
   .trends canvas { height: 120px; }
-  table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
-  th, td { text-align: right; padding: 3px 6px; border-bottom: 1px solid var(--grid); }
+  table { width: 100%; border-collapse: collapse; font-size: 15px; font-variant-numeric: tabular-nums; }
+  th, td { text-align: right; padding: 4px 7px; border-bottom: 1px solid var(--grid); }
   th:first-child, td:first-child { text-align: left; }
   th { color: var(--ink3); font-weight: 500; }
   .tablewrap { overflow-x: auto; padding: 0 20px 20px; }
   button, select { background: #2f2f2d; color: var(--ink); border: 1px solid var(--grid); border-radius: 6px; padding: 4px 8px; font: inherit; font-size: 13px; cursor: pointer; }
-  #hover { font-size: 12px; color: var(--ink2); min-height: 16px; font-variant-numeric: tabular-nums; }
+  #hover { font-size: 14px; color: var(--ink2); min-height: 18px; font-variant-numeric: tabular-nums; }
   @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
 </style>
 </head>
@@ -264,7 +265,7 @@ document.getElementById("saveref").addEventListener("click", () => {
 const H = {
   snapshot: d => { S.strokes.clear(); d.strokes.forEach(s => S.strokes.set(s.stroke_count, s)); S.status = d.status || {}; S.summary = d.summary || {}; },
   reset: d => { S.strokes.clear(); S.status = {}; S.summary = {}; document.getElementById("banner").textContent = d.replay ? `replaying ${d.replay}` : ""; },
-  device: d => { S.device = d; document.getElementById("banner").textContent = `${d.name} · firmware ${d.firmware_rev}`; },
+  device: d => { S.device = d; document.getElementById("banner").textContent = `${d.name} · firmware ${d.firmware_rev}${d.workout ? " · " + d.workout : ""}`; },
   status: d => { S.status = d; },
   stroke: d => { S.strokes.set(d.stroke_count, d); },
   stroke_update: d => { const s = S.strokes.get(d.stroke_count); if (s) Object.assign(s, d); },

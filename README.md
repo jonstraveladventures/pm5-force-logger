@@ -49,6 +49,22 @@ python pm5_logger.py --replay data/raw/<start>.jsonl        # replay a real sess
 
 Keep your PM5's firmware up to date through ErgData. Concept2's March 2026 firmware added a new force-curve format over Bluetooth, and the May 2026 release fixed the monitor freezing while sending force-curve data.
 
+## Program a workout
+
+The logger can program the piece on the PM5 before recording, as ErgData does, so you can leave your phone in another room:
+
+```bash
+python pm5_logger.py --workout 5000m/1000m      # single distance with 1000 m splits, then record
+python pm5_logger.py --workout 4x4:00/3:00r     # 4 intervals of 4:00 with 3:00 rest, then record
+python pm5_workouts.py 20:00/4:00               # program only, row without the logger
+python pm5_workouts.py --list                   # the named workouts in workouts.json
+python pm5_workouts.py --terminate              # clear a programmed piece
+```
+
+A workout can be a distance (`2000m`, `2.5km`), a time (`20:00`, `1:00:00`) or calories (`100cal`). You can add a split after a slash (`5000m/1000m`). If you leave it out, you get five splits. Use `NxWORK/RESTr` for N intervals with timed rest, such as `8x500m/1:00r`. The trailing r marks the preceding value as rest. With `NxWORK`, the rest is undefined and ends when you start rowing again. You can also mix intervals in a comma-separated list (`4:00/3:00r,500m/1:00r`), up to the PM5's limit of 50 intervals. Add `@1:45` at the end to set a target pace per 500 m.
+
+You can use a workout name from `workouts.json` in place of this syntax, and edit the file to add your own named pieces. The frames are built from Concept2's CSAFE specification and checked against its worked examples in the tests. To inspect them without using Bluetooth, `--frame SPEC` prints the bytes.
+
 ## What's saved
 
 Everything is saved in `data/` (change it with `--out`), which `.gitignore` keeps out of version control.
