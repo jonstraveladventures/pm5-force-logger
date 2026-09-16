@@ -178,6 +178,10 @@ Jonathan Shock built this with Claude, Anthropic's AI model, working in Claude C
 
 This project is not affiliated with or endorsed by Concept2.
 
+## Not advice
+
+This is a hobby project, not coaching or medical advice. The shape targets are guides from published rowing research, the fitness numbers are rough estimates, and rowing hard carries the usual risks, so row within your own limits and talk to a professional about your health. The software is offered as is, under the MIT licence, and its authors accept no liability for its use.
+
 ## Licence
 
 MIT
