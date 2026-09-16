@@ -25,6 +25,10 @@ const BANDS = {
 };
 function bandOf(v, list) { let name = "below " + list[0][1]; for (const [lo, label] of list) if (v >= lo) name = label; return name; }
 const bandText = list => list.map(([lo, l]) => `${l} ${lo}+`).join(", ");
+// Body mass, shared with the fitness settings (localStorage pm5_fitness.PM5_MASS_KG): per-kilogram work and force
+// compare rowers of different sizes without inventing weight bands.
+function massKg() { try { const v = parseFloat((JSON.parse(localStorage.getItem("pm5_fitness")) || {}).PM5_MASS_KG); return v > 0 ? v : null; } catch { return null; } }
+function setMassKg(v) { try { const f = JSON.parse(localStorage.getItem("pm5_fitness")) || {}; if (v > 0) f.PM5_MASS_KG = String(v); else delete f.PM5_MASS_KG; localStorage.setItem("pm5_fitness", JSON.stringify(f)); } catch {} }
 const RP3_SHAPE = Array.from({ length: 101 }, (_, i) => { const x = i / 100, p = 0.45; return x < p ? 1 - ((p - x) / p) ** 2 : 1 - ((x - p) / (1 - p)) ** 2; });
 
 // ---------- curve maths ----------
@@ -143,7 +147,7 @@ function renderMetrics() {
   const ref = reference(), T = school(), B = bands(); const inRange = (v, t) => v >= t.lo && v <= t.hi;
   const flag = (v, t, lowWord, highWord) => !t ? "" : inRange(v, t) ? `<span class="flag ok">✓ in range</span>` : `<span class="flag off">▲ ${v > t.hi ? highWord : lowWord}</span>`;
   const label = t => t ? t.label : "no target in this school";
-  const peakN = cur.peak_force_lbf ? cur.peak_force_lbf * 4.448 : null;
+  const peakN = cur.peak_force_lbf ? cur.peak_force_lbf * 4.448 : null, mass = massKg();
   const bandRow = (name, value, unit, key, note) => B && value != null ? [[name, `${unit === "m" ? n2(value) : n0(value)} ${unit}`, `RP3 ${$("bands").value}: ${bandText(B[key])}`, `<span class="flag">${bandOf(value, B[key])}</span>`, note]] : [];
   const rows = [
     ["Peak position", `${m.a100}%`, label(T.a100), flag(m.a100, T.a100, "early", "late"), "Where in the drive force peaks. Kleshnev's crews peak early (legs); RP3's rounded stroke peaks just before the oar is square, around 43–48%. Later than 55% points to the back taking over from the legs."],
@@ -157,6 +161,9 @@ function renderMetrics() {
     ...bandRow("Work per stroke", cur.work_j, "J", "work", `Energy into the flywheel this stroke${cur.work_j ? `; × parabola fit = ${n0(cur.work_j * m.r2)} J effective (RP3)` : ""}. RP3's bands come from a dynamic erg, so a rough placement, not a ranking.`),
     ...bandRow("Peak force", peakN, "N", "peak_n", "Peak handle force in newtons. RP3's bands are not from PM5 handle force, so treat the placement loosely."),
     ...bandRow("Drive length", cur.drive_length_m, "m", "drive", `RP3's bands for a rower of ${B ? B.height : ""}; taller rowers row longer.`),
+    ...(mass && cur.work_j ? [["Work per kg", `${n1(cur.work_j / mass)} J/kg`, "higher = more work for your size", "", `Work per stroke divided by your body mass (${mass} kg): the fairer comparison between rowers of different sizes.`]] : []),
+    ...(mass && peakN ? [["Peak force per kg", `${n2(peakN / mass)} N/kg`, "for your size", "", `Peak handle force divided by your body mass (${mass} kg).`]] : []),
+    ...(!mass ? [["Per kilogram", "—", "enter your mass (kg) above", "", "With your body mass, work and peak force are also shown per kilogram, which compares rowers of different sizes without weight classes."]] : []),
   ];
   el.innerHTML = rows.map(([k, v, t, f, note]) => `<div>${k}<div class="t">target ${t} ${f}</div></div><div></div><div class="v">${v}</div><div class="note">${note}</div>`).join("");
   $("shapeTitle").textContent = `Curve shape, stroke ${cur.stroke_count}`;
@@ -225,6 +232,8 @@ $("src").addEventListener("change", render);
 $("refsel").addEventListener("change", () => { rememberChoices(); render(); });
 $("school").addEventListener("change", () => { rememberChoices(); render(); });
 $("bands").addEventListener("change", () => { rememberChoices(); render(); });
+$("mass").value = massKg() ?? "";
+$("mass").addEventListener("change", () => { setMassKg(parseFloat($("mass").value)); if ($("fit_mass")) $("fit_mass").value = $("mass").value; render(); });
 $("saveref").addEventListener("click", () => {
   const series = strokesWithCurves().map(s => metrics(s[src()])).filter(Boolean); const avg = meanCurve(series.map(m => m.norm));
   if (!avg) { alert("No force curves yet in this session."); return; }

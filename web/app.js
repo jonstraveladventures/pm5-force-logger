@@ -167,6 +167,7 @@ function showFitness(sessions) {
     const env = {};
     for (const [id, key] of Object.entries(FIT)) if ($(id).value !== "") env[key] = $(id).value;
     localStorage.setItem("pm5_fitness", JSON.stringify(env));
+    $("mass").value = env.PM5_MASS_KG ?? ""; render();
     $("fit_out").textContent = "";
     const cfg = fitnessCfg();
     $("fit_out").textContent = cfg ? `saved: ${cfg.mass_kg} kg, HRmax ${cfg.hrmax}, resting ${cfg.hr_rest}, watts reported at ${cfg.zone_hr} bpm${cfg.notes.length ? "\n" + cfg.notes.map(n => "note: " + n).join("\n") : ""}` : "mass and maximum heart rate are both needed";
