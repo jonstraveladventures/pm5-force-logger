@@ -135,7 +135,7 @@
       <h2>Force curve</h2>
       <div class="row">
         <label>Curve <select id="src"><option value="force_curve_v2">new channel (one point per reading)</option><option value="force_curve">documented channel (time steps)</option></select></label>
-        <label>Compare to <select id="refsel"><option value="kleshnev">reference shape (Kleshnev targets)</option><option value="mine">my saved reference</option></select></label>
+        <label>Compare to <select id="refsel"><option value="kleshnev">Kleshnev shape (front-loaded)</option><option value="rp3">RP3 shape (rounded, peak 45%)</option><option value="mine">my saved reference</option></select></label>
         <button id="saveref" title="Store this session's average curve as your personal reference">Save average as my reference</button>
       </div>
     </div>
@@ -149,7 +149,9 @@
     <div id="hover"></div>
   </div>
   <div class="panel">
-    <h2 id="shapeTitle">Curve shape, this stroke</h2>
+    <div class="row" style="justify-content: space-between"><h2 id="shapeTitle">Curve shape, this stroke</h2>
+      <div class="row"><label>Targets <select id="school"><option value="kleshnev">Kleshnev (on-water crews)</option><option value="rp3">RP3 (rounded stroke)</option></select></label>
+      <label>RP3 bands <select id="bands"><option value="off">off</option><option value="men">men</option><option value="women">women</option></select></label></div></div>
     <div class="metrics" id="metrics"></div>
   </div>
 </main>

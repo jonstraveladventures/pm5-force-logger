@@ -113,6 +113,10 @@ There is no single perfect curve, and coaches disagree about the details, though
 | Finish plateau | How long force stays above 70% of peak after the peak | 28–40% of the drive |
 | Rectangle index | Average force ÷ peak force | 38–64%; higher is a fuller curve |
 
+There is a second school, and the dashboard offers it as an alternative. RP3 Rowing, whose dynamic ergs measure force curves for many national crews, argues for a rounder curve (the German "Schubschlag", a thrust stroke) with its peak just before the oar is square, at about 43 to 48 per cent of the drive depending on the boat, and says that the front-loaded shape Kleshnev's targets describe is rare among winning crews. Their guidance is set out in their training guide "Training with RP3 for Dummies" (v1.2, 2025) and the white paper "How coaches could use the RP3 indoor rower" (Broenink and Bon, v1.3, 2023), both on rp3rowing.com. Choose "RP3" under Targets to score the peak position against their band and to compare with a rounded reference shape instead. The two schools disagree about the peak; they agree that the curve should be smooth, with no dips, and that later than about 55 per cent means the back has taken over.
+
+Two things from the RP3 material are shown whichever school you pick. The parabola fit is how closely the curve follows a parabola, the score RP3's own software uses for stroke quality; work per stroke times that score is their "effective work per stroke". And with "RP3 bands" switched on, the work per stroke, peak force and drive length of each stroke are placed against RP3's guideline bands for club, intermediate and elite rowers (men or women, drive length for a rower of average height). Those bands come from a dynamic erg whose force is not the PM5's handle force, so they place a number roughly; they are not a ranking.
+
 The dashboard also counts dips as the force rises and measures how far the shape of each stroke is from the reference and your session average. For these comparisons, each curve is trimmed from the first force to the release and scaled to its own peak. This compares the shape of the curves, not how hard you pulled.
 
 Treat the targets as guides, not pass marks:
@@ -175,6 +179,7 @@ Jonathan Shock built this with Claude, Anthropic's AI model, working in Claude C
 - Concept2, [Logbook API documentation](https://log.concept2.com/developers/documentation/)
 - Concept2, [Improving your rows with the force curve](https://www.concept2.com/blog/improving-your-rows-with-the-force-curve)
 - V. Kleshnev (2011), *Biomechanics of Rowing*; the targets as summarised by [biomex.studio](https://biomex.studio/rowing/)
+- RP3 Rowing, [Training with RP3 for Dummies](https://rp3rowing.com/wp-content/uploads/2025/09/Training-with-RP3-for-Dummies-v1.2-English.pdf), v1.2 (2025), and S. Broenink and S. Bon, [How coaches could use the RP3 indoor rower to improve rowers](https://rp3rowing.com/wp-content/uploads/2025/09/White-Paper-Improve-the-ForceCurve-ENG-1.3-4.pdf), v1.3 (2023). Their peak-position band, stroke-quality score and guideline bands are restated here with attribution; the documents themselves are RP3's.
 
 This project is not affiliated with or endorsed by Concept2.
 

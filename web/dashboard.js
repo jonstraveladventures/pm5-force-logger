@@ -10,6 +10,22 @@ const TARGETS = {  // Kleshnev (2011), Biomechanics of Rowing, via biomex.studio
 };
 // Reference shape built to meet those targets: peak position 33%, catch gradient 13%, finish plateau 33%, rectangle index 61%. A template, not a measured curve.
 const KLESHNEV_PTS = [[0, 0], [.06, .4], [.18, .85], [.36, 1], [.66, .72], [.8, .25], [.92, .1], [1, 0]];
+// The other school: RP3 Rowing's rounded "Schubschlag" curve, peak just before the oar is square (their training guide v1.2,
+// 2025, and force-curve white paper v1.3, 2023). Only the peak position has a number; the rest is "full and smooth", which
+// their portal scores as the fit to a parabola. Their peak band is from a dynamic erg, so a guide here too.
+const RP3 = { a100: { lo: 40, hi: 50, label: "40–50% (RP3: ideal 43–48%)" }, a70: null, d70: null, ram: null, dips: { lo: 0, hi: 0, label: "none" } };
+const SCHOOLS = { kleshnev: TARGETS, rp3: RP3 };
+// RP3's guideline bands (training guide v1.2, appendix), restated. Their erg is dynamic and its force is not the PM5's handle
+// force, so this places a number roughly; it is not a ranking. Drive length is for a rower of average height.
+const BANDS = {
+  men: { work: [[350, "club"], [500, "intermediate"], [650, "elite"]], peak_n: [[250, "club"], [330, "intermediate"], [460, "elite"]],
+         drive: [[1.30, "beginner"], [1.35, "intermediate"], [1.40, "expert"]], height: "1.75–1.85 m" },
+  women: { work: [[300, "club"], [400, "intermediate"], [480, "elite"]], peak_n: [[200, "club"], [250, "intermediate"], [350, "elite"]],
+           drive: [[1.20, "beginner"], [1.25, "intermediate"], [1.35, "expert"]], height: "1.65–1.75 m" },
+};
+function bandOf(v, list) { let name = "below " + list[0][1]; for (const [lo, label] of list) if (v >= lo) name = label; return name; }
+const bandText = list => list.map(([lo, l]) => `${l} ${lo}+`).join(", ");
+const RP3_SHAPE = Array.from({ length: 101 }, (_, i) => { const x = i / 100, p = 0.45; return x < p ? 1 - ((p - x) / p) ** 2 : 1 - ((x - p) / (1 - p)) ** 2; });
 
 // ---------- curve maths ----------
 export function trim(p) { if (!p || p.length < 3) return null; let a = 0, b = p.length - 1; while (a < b && p[a] <= 0) a++; while (b > a && p[b] <= 0) b--; return b - a >= 2 ? p.slice(a, b + 1) : null; }
@@ -26,7 +42,17 @@ export function metrics(points) {
   let dips = 0, runMax = 0, inDip = false, lowest = 0; // a "blip": after force passes 50% of peak, it falls >=8% of peak then recovers >=5%
   for (let i = 0; i < r.length; i++) { const v = r[i]; if (v > runMax) { if (inDip && v - lowest >= 0.05 * fmax) { dips++; inDip = false; } runMax = v; }
     if (runMax >= 0.5 * fmax && runMax - v >= 0.08 * fmax && i < imax + 1) { if (!inDip) { inDip = true; lowest = v; } lowest = Math.min(lowest, v); } }
-  return { norm: r.map(v => v / fmax), fmax, a100: imax, a70, d70: j - imax, ram: 100 * mean / fmax, dips };
+  return { norm: r.map(v => v / fmax), fmax, a100: imax, a70, d70: j - imax, ram: 100 * mean / fmax, dips, r2: parabolaR2(r) };
+}
+function parabolaR2(r) { // least-squares y = a x^2 + b x + c on x in [0, 1]; R^2 is RP3's stroke-quality score (1 = a perfect parabola)
+  const n = r.length; let sx = 0, sx2 = 0, sx3 = 0, sx4 = 0, sy = 0, sxy = 0, sx2y = 0;
+  for (let i = 0; i < n; i++) { const x = i / (n - 1), y = r[i]; sx += x; sx2 += x * x; sx3 += x ** 3; sx4 += x ** 4; sy += y; sxy += x * y; sx2y += x * x * y; }
+  const det = (m) => m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+  const A = [[sx4, sx3, sx2], [sx3, sx2, sx], [sx2, sx, n]], B = [sx2y, sxy, sy], D = det(A); if (!D) return 0;
+  const col = (k) => det(A.map((row, i) => row.map((v, j) => j === k ? B[i] : v))) / D; const [a, b, c] = [col(0), col(1), col(2)];
+  const mean = sy / n; let ssr = 0, sst = 0;
+  for (let i = 0; i < n; i++) { const x = i / (n - 1), f = a * x * x + b * x + c; ssr += (r[i] - f) ** 2; sst += (r[i] - mean) ** 2; }
+  return sst ? Math.max(0, 1 - ssr / sst) : 0;
 }
 function rmsePct(a, b) { if (!a || !b) return null; let s = 0; for (let i = 0; i < a.length; i++) s += (a[i] - b[i]) ** 2; return 100 * Math.sqrt(s / a.length); }
 function meanCurve(list) { const c = list.filter(Boolean); if (!c.length) return null; const m = c[0].map((_, i) => c.reduce((s, x) => s + x[i], 0) / c.length); const mx = Math.max(...m); return m.map(v => v / mx); }
@@ -70,7 +96,11 @@ const canvasFont = () => `${Math.round(11 * (parseFloat(css("--text")) || 1))}px
 const src = () => $("src").value;
 const refKey = () => $("refsel").value;
 const KLESHNEV = fromControl(KLESHNEV_PTS);
-function reference() { if (refKey() === "mine") { try { return JSON.parse(localStorage.getItem("pm5_my_reference")); } catch { return null; } } return KLESHNEV; }
+function reference() { if (refKey() === "mine") { try { return JSON.parse(localStorage.getItem("pm5_my_reference")); } catch { return null; } } return refKey() === "rp3" ? RP3_SHAPE : KLESHNEV; }
+const school = () => SCHOOLS[$("school").value] || TARGETS;
+const bands = () => BANDS[$("bands").value] || null;
+function rememberChoices() { try { localStorage.setItem("pm5_choices", JSON.stringify({ ref: refKey(), school: $("school").value, bands: $("bands").value })); } catch {} }
+(function restoreChoices() { try { const c = JSON.parse(localStorage.getItem("pm5_choices")) || {}; for (const [id, k] of [["refsel", "ref"], ["school", "school"], ["bands", "bands"]]) if (c[k]) $(id).value = c[k]; } catch {} })();
 const strokesWithCurves = () => [...S.strokes.values()].filter(s => trim(s[src()])).sort((a, b) => a.stroke_count - b.stroke_count);
 const lastStroke = () => { const all = [...S.strokes.values()]; return all.length ? all.reduce((a, b) => b.stroke_count > a.stroke_count ? b : a) : null; };
 
@@ -110,16 +140,23 @@ function renderMetrics() {
   const list = strokesWithCurves(); const cur = list[list.length - 1]; const el = $("metrics");
   if (!cur) { el.innerHTML = `<div class="note">Force-curve metrics appear after the first stroke.</div>`; return; }
   const m = metrics(cur[src()]); const series = list.map(s => metrics(s[src()])).filter(Boolean); const avg = meanCurve(series.map(x => x.norm));
-  const ref = reference(); const inRange = (v, t) => v >= t.lo && v <= t.hi;
-  const flag = (v, t, lowWord, highWord) => inRange(v, t) ? `<span class="flag ok">✓ in range</span>` : `<span class="flag off">▲ ${v > t.hi ? highWord : lowWord}</span>`;
+  const ref = reference(), T = school(), B = bands(); const inRange = (v, t) => v >= t.lo && v <= t.hi;
+  const flag = (v, t, lowWord, highWord) => !t ? "" : inRange(v, t) ? `<span class="flag ok">✓ in range</span>` : `<span class="flag off">▲ ${v > t.hi ? highWord : lowWord}</span>`;
+  const label = t => t ? t.label : "no target in this school";
+  const peakN = cur.peak_force_lbf ? cur.peak_force_lbf * 4.448 : null;
+  const bandRow = (name, value, unit, key, note) => B && value != null ? [[name, `${unit === "m" ? n2(value) : n0(value)} ${unit}`, `RP3 ${$("bands").value}: ${bandText(B[key])}`, `<span class="flag">${bandOf(value, B[key])}</span>`, note]] : [];
   const rows = [
-    ["Peak position", `${m.a100}%`, TARGETS.a100.label, flag(m.a100, TARGETS.a100, "early", "late"), "Where in the drive force peaks. Late peaks (past 55%) point to the back taking over from the legs."],
-    ["Catch gradient", `${m.a70}%`, TARGETS.a70.label, flag(m.a70, TARGETS.a70, "", "slow"), "How far into the drive before force reaches 70% of peak: how quickly the legs load."],
-    ["Finish plateau", `${m.d70}%`, TARGETS.d70.label, flag(m.d70, TARGETS.d70, "short", "long"), "How long force stays above 70% of peak after the peak: the back and arms carrying it on."],
-    ["Rectangle index", `${n0(m.ram)}%`, TARGETS.ram.label, flag(m.ram, TARGETS.ram, "peaky", "flat"), "Average force as a share of peak. Higher is a fuller curve."],
-    ["Blips", `${m.dips}`, TARGETS.dips.label, m.dips ? `<span class="flag off">▲ dip in the rise</span>` : `<span class="flag ok">✓ smooth</span>`, "A dip on the way up, usually the handover from legs to back."],
+    ["Peak position", `${m.a100}%`, label(T.a100), flag(m.a100, T.a100, "early", "late"), "Where in the drive force peaks. Kleshnev's crews peak early (legs); RP3's rounded stroke peaks just before the oar is square, around 43–48%. Later than 55% points to the back taking over from the legs."],
+    ["Catch gradient", `${m.a70}%`, label(T.a70), flag(m.a70, T.a70, "", "slow"), "How far into the drive before force reaches 70% of peak: how quickly the legs load."],
+    ["Finish plateau", `${m.d70}%`, label(T.d70), flag(m.d70, T.d70, "short", "long"), "How long force stays above 70% of peak after the peak: the back and arms carrying it on."],
+    ["Rectangle index", `${n0(m.ram)}%`, label(T.ram), flag(m.ram, T.ram, "peaky", "flat"), "Average force as a share of peak. Higher is a fuller curve; a parabola scores 67%."],
+    ["Parabola fit", `${n0(100 * m.r2)}%`, "higher = rounder", "", "How closely the curve follows a parabola, RP3's stroke-quality score. Effective work per stroke is work × this."],
+    ["Blips", `${m.dips}`, label(T.dips), m.dips ? `<span class="flag off">▲ dip in the rise</span>` : `<span class="flag ok">✓ smooth</span>`, "A dip on the way up, usually the handover from legs to back."],
     ["Shape vs reference", ref ? `${n1(rmsePct(m.norm, ref))}%` : "—", "lower = closer", "", "Typical gap between this stroke's shape and the reference, as % of peak (both scaled to the same peak)."],
     ["Stroke-to-stroke", avg && series.length > 1 ? `${n1(rmsePct(m.norm, avg))}%` : "—", "lower = steadier", "", "Gap between this stroke's shape and your session average."],
+    ...bandRow("Work per stroke", cur.work_j, "J", "work", `Energy into the flywheel this stroke${cur.work_j ? `; × parabola fit = ${n0(cur.work_j * m.r2)} J effective (RP3)` : ""}. RP3's bands come from a dynamic erg, so a rough placement, not a ranking.`),
+    ...bandRow("Peak force", peakN, "N", "peak_n", "Peak handle force in newtons. RP3's bands are not from PM5 handle force, so treat the placement loosely."),
+    ...bandRow("Drive length", cur.drive_length_m, "m", "drive", `RP3's bands for a rower of ${B ? B.height : ""}; taller rowers row longer.`),
   ];
   el.innerHTML = rows.map(([k, v, t, f, note]) => `<div>${k}<div class="t">target ${t} ${f}</div></div><div></div><div class="v">${v}</div><div class="note">${note}</div>`).join("");
   $("shapeTitle").textContent = `Curve shape, stroke ${cur.stroke_count}`;
@@ -127,15 +164,15 @@ function renderMetrics() {
 
 const TRENDS = [
   ["Peak force (lbf)", s => s.peak_force_lbf, null],
-  ["Peak position (% of drive)", s => metrics(s[src()])?.a100, TARGETS.a100],
-  ["Rectangle index (%)", s => metrics(s[src()])?.ram, TARGETS.ram],
+  ["Peak position (% of drive)", s => metrics(s[src()])?.a100, () => school().a100],
+  ["Rectangle index (%)", s => metrics(s[src()])?.ram, () => school().ram],
   ["Drive length (m)", s => s.drive_length_m, null],
   ["Power (W)", s => s.power_w, null],
 ];
 $("trends").innerHTML = TRENDS.map((t, i) => `<div class="panel"><h2>${t[0]}${t[2] ? ` <span style="font-weight:400;color:var(--ink3)">· shaded: target</span>` : ""}</h2><canvas id="tr${i}"></canvas></div>`).join("");
 function drawTrends() {
   const list = [...S.strokes.values()].sort((a, b) => a.stroke_count - b.stroke_count);
-  TRENDS.forEach(([name, fn, band], i) => {
+  TRENDS.forEach(([name, fn, bandFn], i) => { const band = bandFn ? bandFn() : null;
     const c = $("tr" + i); const [g, w, h] = setupCanvas(c); const pad = { l: 34, r: 8, t: 6, b: 18 };
     const pts = list.map(s => [s.stroke_count, fn(s)]).filter(p => p[1] != null && !Number.isNaN(p[1]));
     g.fillStyle = css("--ink3"); g.font = canvasFont();
@@ -185,7 +222,9 @@ function applyUI(save = true) {
   applyUI(false);
 })();
 $("src").addEventListener("change", render);
-$("refsel").addEventListener("change", render);
+$("refsel").addEventListener("change", () => { rememberChoices(); render(); });
+$("school").addEventListener("change", () => { rememberChoices(); render(); });
+$("bands").addEventListener("change", () => { rememberChoices(); render(); });
 $("saveref").addEventListener("click", () => {
   const series = strokesWithCurves().map(s => metrics(s[src()])).filter(Boolean); const avg = meanCurve(series.map(m => m.norm));
   if (!avg) { alert("No force curves yet in this session."); return; }
