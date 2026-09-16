@@ -1,0 +1,9 @@
+{
+  "name": "pm5-force-logger-web",
+  "private": true,
+  "type": "module",
+  "description": "The browser version of pm5-force-logger: Web Bluetooth, no install.",
+  "scripts": {
+    "test": "node --test tests/"
+  }
+}

@@ -208,7 +208,7 @@ def build(spec: dict) -> bytes:
                "time": ("time_s", "split_s", DUR_TIME, 100),
                "calories": ("calories", "split_cal", DUR_CALORIES, 1)}[kind]
         total, split, ident, scale = dur
-        cmds += [long_cmd(SET_WORKOUTTYPE, bytes([WT[kind]])),
+        cmds += [long_cmd(SET_WORKOUTTYPE, bytes([WT["calorie" if kind == "calories" else kind]])),
                  long_cmd(SET_WORKOUTDURATION, bytes([ident]) + be(s[total] * scale, 4)),
                  long_cmd(SET_SPLITDURATION, bytes([ident]) + be(s[split] * scale, 4))]
     elif kind == "interval":
@@ -295,7 +295,7 @@ def parse_spec(text: str) -> dict:
     if len(parts) > 1:
         ivs = [_parse_interval(p) for p in parts]
         return {"intervals": ivs, **({"pace_s": pace} if pace else {})}
-    p = parts[0]
+    p = parts[0] if parts else ""
     if m := re.match(r"^(\d+)\s*[x×]\s*(.+)$", p, re.I):
         count, rest = int(m.group(1)), m.group(2)
         return {"intervals": [_parse_interval(rest)], "repeat": count, **({"pace_s": pace} if pace else {})}

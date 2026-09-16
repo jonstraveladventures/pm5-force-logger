@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PM5 Live</title>
+<meta name="description" content="Record a Concept2 PM5 from your browser: every stroke's force curve, live, with nothing to install.">
+<style>
+  :root {
+    --surface: #1a1a19; --panel: #232322; --grid: #3a3a38; --ink: #ffffff; --ink2: #c3c2b7; --ink3: #8d8c84;
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --good: #3aa655; --warn: #d9a300;
+    --text: 1; --curve-h: 270px; --curve-w: 56%;   /* the Display sliders set these; saved per browser */
+  }
+  html { font-size: calc(17px * var(--text)); }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--surface); color: var(--ink); font: 1rem/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; align-items: center; gap: 12px; padding: 12px 20px 4px; flex-wrap: wrap; }
+  header h1 { font-size: 1.06rem; font-weight: 600; margin: 0; }
+  #conn { font-size: .76rem; color: var(--ink3); }
+  #conn.live { color: var(--good); }
+  #conn.err { color: var(--warn); }
+  #banner { margin-left: auto; font-size: .76rem; color: var(--ink2); }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(calc(150px * var(--text)), 1fr)); gap: 10px; padding: 8px 20px; }
+  .tile { background: var(--panel); border-radius: 10px; padding: 10px 12px; }
+  .tile .label { font-size: .82rem; color: var(--ink3); text-transform: uppercase; letter-spacing: .04em; }
+  .tile .value { font-size: clamp(1.5rem, calc(2.5vw * var(--text)), 2.4rem); font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.1; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: clip; }
+  .tile .sub { font-size: .88rem; color: var(--ink2); font-variant-numeric: tabular-nums; }
+  main { display: grid; grid-template-columns: var(--curve-w) minmax(0, 1fr); gap: 12px; padding: 4px 20px 12px; }
+  .panel { background: var(--panel); border-radius: 10px; padding: 12px 14px; min-width: 0; }
+  .panel h2 { font-size: 1.06rem; font-weight: 600; margin: 0 0 8px; color: var(--ink2); }
+  .row { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; font-size: .82rem; color: var(--ink2); }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; margin-right: 12px; }
+  .swatch { width: 18px; height: 0; border-top: 3px solid; display: inline-block; }
+  .swatch.dash { border-top-style: dashed; }
+  canvas { width: 100%; display: block; }
+  #curve { height: var(--curve-h); }
+  .metrics { display: grid; grid-template-columns: 1fr auto auto; gap: 6px 14px; font-size: 1.18rem; align-items: baseline; }
+  .metrics .v { font-size: 1.76rem; font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; }
+  .metrics .t { font-size: .94rem; color: var(--ink3); }
+  .metrics .note { grid-column: 1 / -1; font-size: .88rem; color: var(--ink3); margin: -2px 0 8px; }
+  .flag { font-size: .94rem; font-weight: 600; }
+  .flag.ok { color: var(--good); } .flag.off { color: var(--warn); }
+  .trends { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; padding: 0 20px 12px; }
+  .trends canvas { height: 120px; }
+  table { width: 100%; border-collapse: collapse; font-size: .88rem; font-variant-numeric: tabular-nums; }
+  th, td { text-align: right; padding: 4px 7px; border-bottom: 1px solid var(--grid); }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--ink3); font-weight: 500; }
+  .tablewrap { overflow-x: auto; padding: 0 20px 12px; }
+  button, select { background: #2f2f2d; color: var(--ink); border: 1px solid var(--grid); border-radius: 6px; padding: 4px 8px; font: inherit; font-size: .76rem; cursor: pointer; }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary { background: var(--s1); border-color: var(--s1); color: #fff; }
+  input[type=text], input[type=number] { background: #2f2f2d; color: var(--ink); border: 1px solid var(--grid); border-radius: 6px; padding: 4px 8px; font: inherit; font-size: .82rem; }
+  details.menu { font-size: .76rem; color: var(--ink2); }
+  details.menu summary { cursor: pointer; list-style: none; color: var(--ink3); }
+  details.menu[open] summary { color: var(--ink2); }
+  #display .sliders { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; padding: 6px 0 0; }
+  #display label { display: inline-flex; gap: 6px; align-items: center; white-space: nowrap; }
+  #display input[type=range] { width: 110px; }
+  .setup { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; padding: 6px 20px 2px; font-size: .82rem; color: var(--ink2); }
+  .setup select { max-width: 24em; }
+  .setup input[type=text] { width: 15em; }
+  #wo_status { font-size: .82rem; } #wo_status.ok { color: var(--good); } #wo_status.err { color: var(--warn); }
+  #hover { font-size: .82rem; color: var(--ink2); min-height: 18px; font-variant-numeric: tabular-nums; }
+  #intro { margin: 8px 20px; font-size: .94rem; color: var(--ink2); max-width: 62em; }
+  #intro p { margin: 6px 0; }
+  #intro ol { margin: 6px 0 6px 1.2em; padding: 0; }
+  #intro .warn { color: var(--warn); }
+  .more { padding: 0 20px 20px; display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+  .more .fields { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; font-size: .82rem; color: var(--ink2); }
+  .more label { display: flex; flex-direction: column; gap: 3px; }
+  .more input[type=number] { width: 7em; }
+  pre { white-space: pre-wrap; font: .82rem/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--ink2); margin: 8px 0 0; }
+  .note { font-size: .82rem; color: var(--ink3); }
+  #sessions table { font-size: .82rem; }
+  #sessions td:first-child { white-space: nowrap; }
+  #sessions button { padding: 2px 6px; margin-left: 4px; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>PM5 Live</h1>
+  <button id="connect" class="primary">Connect to PM5</button>
+  <button id="stop" hidden>Stop and save</button>
+  <button id="sample">Try the sample</button>
+  <span id="conn">not connected</span>
+  <details id="display" class="menu"><summary>Display ▾</summary><div class="sliders">
+    <label>Text <input type="range" id="ui_text" min="0.7" max="2" step="0.05"> <span id="ui_text_v"></span></label>
+    <label>Curve height <input type="range" id="ui_h" min="140" max="640" step="10"> <span id="ui_h_v"></span></label>
+    <label>Curve width <input type="range" id="ui_w" min="30" max="80" step="1"> <span id="ui_w_v"></span></label>
+    <button id="ui_reset">Reset</button>
+  </div></details>
+  <span id="banner"></span>
+</header>
+
+<div id="intro">
+  <p><b>Record a Concept2 PM5 from this page: every stroke's force curve, live, with nothing to install.</b> Rows are kept in this browser and leave it only as files you download. Nothing is sent anywhere.</p>
+  <p id="nobt" class="warn" hidden>This browser cannot talk to Bluetooth devices. Open this page in Chrome or Edge (on a Mac, Windows PC, Chromebook or Android phone); Safari and Firefox don't offer Web Bluetooth.</p>
+  <ol>
+    <li>Close ErgData and any other rowing app: the PM5 talks to one app at a time, and a Bluetooth symbol on its screen means something is still connected.</li>
+    <li>Wake the PM5 by pressing a button, then press <b>Connect to PM5</b> and pick it from the list.</li>
+    <li>Set up a piece below if you like, row, and end the piece on the monitor (Menu). It is saved here a minute or so after the PM5 reports the end.</li>
+  </ol>
+  <p class="note">The original PM5v1 doesn't send force curves over Bluetooth. Heart rate appears only when a belt or watch broadcast is paired with the PM5 itself.</p>
+</div>
+
+<section class="setup" id="setup">
+  <span>Set up the PM5:</span>
+  <label>named <select id="wo_named"><option value="">choose…</option></select></label>
+  <label>or type <input type="text" id="wo_spec" placeholder="4x4:00/3:00r · 5000m/1000m · 20:00" title="distance (2000m), time (20:00), splits after a slash, NxWORK/RESTr for intervals, @pace"></label>
+  <button id="wo_send" class="primary" disabled>Send to PM5</button>
+  <button id="wo_clear" title="End the programmed piece on the monitor" disabled>Clear</button>
+  <span id="wo_status"></span>
+</section>
+
+<section class="tiles" id="tiles"></section>
+
+<main>
+  <div class="panel">
+    <div class="row" style="justify-content: space-between">
+      <h2>Force curve</h2>
+      <div class="row">
+        <label>Curve <select id="src"><option value="force_curve_v2">new channel (one point per reading)</option><option value="force_curve">documented channel (time steps)</option></select></label>
+        <label>Compare to <select id="refsel"><option value="kleshnev">reference shape (Kleshnev targets)</option><option value="mine">my saved reference</option></select></label>
+        <button id="saveref" title="Store this session's average curve as your personal reference">Save average as my reference</button>
+      </div>
+    </div>
+    <div class="row legend">
+      <span><i class="swatch" style="border-color: var(--s1)"></i>this stroke</span>
+      <span><i class="swatch" style="border-color: rgba(57,135,229,.35)"></i>last 8 strokes</span>
+      <span><i class="swatch" style="border-color: var(--s3)"></i>session average</span>
+      <span><i class="swatch dash" style="border-color: var(--s2)"></i>reference</span>
+    </div>
+    <canvas id="curve"></canvas>
+    <div id="hover"></div>
+  </div>
+  <div class="panel">
+    <h2 id="shapeTitle">Curve shape, this stroke</h2>
+    <div class="metrics" id="metrics"></div>
+  </div>
+</main>
+
+<section class="trends" id="trends"></section>
+
+<div class="tablewrap">
+  <table id="table"><thead><tr>
+    <th>Stroke</th><th>Drive m</th><th>Drive s</th><th>Recov s</th><th>Ratio</th><th>Dist/stroke m</th><th>Peak lbf</th><th>Avg lbf</th><th>Work J</th><th>Power W</th><th>Peak pos</th><th>Rect idx</th><th>HR</th>
+  </tr></thead><tbody></tbody></table>
+</div>
+
+<section class="more">
+  <div class="panel" id="fitness">
+    <h2>Watts at a set heart rate, and a VO2max estimate</h2>
+    <div class="fields">
+      <label>mass (kg) <input type="number" id="fit_mass" min="30" max="200" step="0.5"></label>
+      <label>max heart rate <input type="number" id="fit_hrmax" min="100" max="230"></label>
+      <label>resting heart rate <input type="number" id="fit_rest" min="30" max="120"></label>
+      <label>report watts at (bpm) <input type="number" id="fit_zone" min="60" max="220"></label>
+      <button id="fit_save">Save</button>
+      <button id="fit_all">Across all saved rows</button>
+    </div>
+    <pre id="fit_out"></pre>
+    <div class="note">From the steady part of a row (after minute five, before the last minute, sprints and pauses dropped), on the line through your resting heart rate; with three or more rows spanning 40 W the line is fitted to your rows instead. The watts at a heart rate near the one you rowed at is the sturdier number; the VO2max is good to 10 to 15 per cent. These settings stay in this browser.</div>
+  </div>
+  <div class="panel" id="sessions">
+    <h2>Saved rows</h2>
+    <div id="sessions_list" class="note">none yet</div>
+    <div class="note" style="margin-top:8px">Files match the Python logger's: the session JSON has one record per stroke with both force curves; the raw log has every Bluetooth message and can rebuild the session later.</div>
+  </div>
+</section>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

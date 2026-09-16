@@ -1,0 +1,592 @@
+{
+ "named": {
+  "2k": {
+   "distance_m": 2000,
+   "split_m": 500
+  },
+  "5k": {
+   "distance_m": 5000,
+   "split_m": 1000
+  },
+  "10k": {
+   "distance_m": 10000,
+   "split_m": 2000
+  },
+  "20min": {
+   "time_s": 1200,
+   "split_s": 240
+  },
+  "30min": {
+   "time_s": 1800,
+   "split_s": 300
+  },
+  "4x4": {
+   "intervals": [
+    {
+     "time_s": 240,
+     "rest_s": 180
+    }
+   ],
+   "repeat": 4
+  },
+  "8x500": {
+   "intervals": [
+    {
+     "distance_m": 500,
+     "rest_s": 60
+    }
+   ],
+   "repeat": 8
+  },
+  "pyramid": {
+   "intervals": [
+    {
+     "distance_m": 250,
+     "rest_s": 60
+    },
+    {
+     "distance_m": 500,
+     "rest_s": 90
+    },
+    {
+     "distance_m": 750,
+     "rest_s": 120
+    },
+    {
+     "distance_m": 500,
+     "rest_s": 90
+    },
+    {
+     "distance_m": 250,
+     "rest_s": 60
+    }
+   ]
+  },
+  "just_row": {
+   "just_row": true,
+   "split_m": 500
+  }
+ },
+ "frames": [
+  {
+   "text": "2000m",
+   "spec": {
+    "distance_m": 2000
+   },
+   "normalised": {
+    "kind": "distance",
+    "distance_m": 2000,
+    "split_m": 400
+   },
+   "description": "2000 m, 400 m splits",
+   "hex": "f17618010103030580000007d0050580000001901401011302010128f2"
+  },
+  {
+   "text": "5000m/1000m",
+   "spec": {
+    "distance_m": 5000,
+    "split_m": 1000
+   },
+   "normalised": {
+    "kind": "distance",
+    "distance_m": 5000,
+    "split_m": 1000
+   },
+   "description": "5000 m, 1000 m splits",
+   "hex": "f1761801010303058000001388050580000003e8140101130201011ef2"
+  },
+  {
+   "text": "20:00/4:00",
+   "spec": {
+    "time_s": 1200,
+    "split_s": 240
+   },
+   "normalised": {
+    "kind": "time",
+    "time_s": 1200,
+    "split_s": 240
+   },
+   "description": "20:00, 4:00 splits",
+   "hex": "f176180101050305000001d4c005050000005dc014010113020101e0f2"
+  },
+  {
+   "text": "1:00:00",
+   "spec": {
+    "time_s": 3600
+   },
+   "normalised": {
+    "kind": "time",
+    "time_s": 3600,
+    "split_s": 720
+   },
+   "description": "1:00:00, 12:00 splits",
+   "hex": "f1761801010503050000057e4005050000011940140101130201010bf2"
+  },
+  {
+   "text": "100cal",
+   "spec": {
+    "calories": 100
+   },
+   "normalised": {
+    "kind": "calories",
+    "calories": 100,
+    "split_cal": 20
+   },
+   "description": "100 cal, 20 cal splits",
+   "hex": "f1761801010a03054000000064050540000000141401011302010117f2"
+  },
+  {
+   "text": "4x4:00/3:00r",
+   "spec": {
+    "intervals": [
+     {
+      "time_s": 240,
+      "rest_s": 180
+     }
+    ],
+    "repeat": 4
+   },
+   "normalised": {
+    "kind": "variable",
+    "intervals": [
+     {
+      "time_s": 240,
+      "rest_s": 180
+     },
+     {
+      "time_s": 240,
+      "rest_s": 180
+     },
+     {
+      "time_s": 240,
+      "rest_s": 180
+     },
+     {
+      "time_s": 240,
+      "rest_s": 180
+     }
+    ]
+   },
+   "description": "4 x 4:00 / 3:00 rest",
+   "hex": "f1765718010001010817010003050000005dc0040200b414010118010117010003050000005dc0040200b414010118010217010003050000005dc0040200b414010118010317010003050000005dc0040200b41401011302010138f2"
+  },
+  {
+   "text": "8x500m/1:00r@1:45",
+   "spec": {
+    "intervals": [
+     {
+      "distance_m": 500,
+      "rest_s": 60
+     }
+    ],
+    "repeat": 8,
+    "pace_s": 105
+   },
+   "normalised": {
+    "kind": "variable",
+    "intervals": [
+     {
+      "distance_m": 500,
+      "rest_s": 60,
+      "pace_s": 105
+     },
+     {
+      "distance_m": 500,
+      "rest_s": 60,
+      "pace_s": 105
+     },
+     {
+      "distance_m": 500,
+      "rest_s": 60,
+      "pace_s": 105
+     },
+     {
+      "distance_m": 500,
+      "rest_s": 60,
+      "pace_s": 105
+     },
+     {
+      "distance_m": 500,
+      "rest_s": 60,
+      "pace_s": 105
+     },
+     {
+      "distance_m": 500,
+      "rest_s": 60,
+      "pace_s": 105
+     },
+     {
+      "distance_m": 500,
+      "rest_s": 60,
+      "pace_s": 105
+     },
+     {
+      "distance_m": 500,
+      "rest_s": 60,
+      "pace_s": 105
+     }
+    ]
+   },
+   "description": "8 x 500 m / 1:00 rest @ 1:45/500m",
+   "hex": "f176d7180100010108170101030580000001f40402003c060400002904140101180101170101030580000001f40402003c060400002904140101180102170101030580000001f40402003c060400002904140101180103170101030580000001f40402003c060400002904140101180104170101030580000001f40402003c060400002904140101180105170101030580000001f40402003c060400002904140101180106170101030580000001f40402003c060400002904140101180107170101030580000001f40402003c06040000290414010113020101b8f2"
+  },
+  {
+   "text": "500m/0:30r",
+   "spec": {
+    "interval": {
+     "distance_m": 500,
+     "rest_s": 30
+    }
+   },
+   "normalised": {
+    "kind": "interval",
+    "interval": {
+     "distance_m": 500,
+     "rest_s": 30
+    }
+   },
+   "description": "intervals of 500 m / 0:30 rest until stopped",
+   "hex": "f17615010107030580000001f40402001e140101130201010af2"
+  },
+  {
+   "text": "4:00/3:00r,500m/1:00r",
+   "spec": {
+    "intervals": [
+     {
+      "time_s": 240,
+      "rest_s": 180
+     },
+     {
+      "distance_m": 500,
+      "rest_s": 60
+     }
+    ]
+   },
+   "normalised": {
+    "kind": "variable",
+    "intervals": [
+     {
+      "time_s": 240,
+      "rest_s": 180
+     },
+     {
+      "distance_m": 500,
+      "rest_s": 60
+     }
+    ]
+   },
+   "description": "2 intervals: 4:00 / 3:00 rest, 500 m / 1:00 rest",
+   "hex": "f1762f18010001010817010003050000005dc0040200b4140101180101170101030580000001f40402003c1401011302010120f2"
+  },
+  {
+   "text": "6x1000m",
+   "spec": {
+    "intervals": [
+     {
+      "distance_m": 1000
+     }
+    ],
+    "repeat": 6
+   },
+   "normalised": {
+    "kind": "variable",
+    "intervals": [
+     {
+      "distance_m": 1000
+     },
+     {
+      "distance_m": 1000
+     },
+     {
+      "distance_m": 1000
+     },
+     {
+      "distance_m": 1000
+     },
+     {
+      "distance_m": 1000
+     },
+     {
+      "distance_m": 1000
+     }
+    ]
+   },
+   "description": "6 x 1000 m / rest until you row",
+   "hex": "f17689180100010108170104030580000003e804020000140101180101170104030580000003e804020000140101180102170104030580000003e804020000140101180103170104030580000003e804020000140101180104170104030580000003e804020000140101180105170104030580000003e80402000014010101010905058000000000130201016ef2"
+  },
+  {
+   "text": "just_row",
+   "spec": {
+    "just_row": true,
+    "split_m": 500
+   },
+   "normalised": {
+    "kind": "just_row",
+    "split_m": 500
+   },
+   "description": "Just Row, 500 m splits",
+   "hex": "f1760e010101050580000001f4130201011df2"
+  },
+  {
+   "text": "2k",
+   "spec": {
+    "distance_m": 2000,
+    "split_m": 500
+   },
+   "normalised": {
+    "kind": "distance",
+    "distance_m": 2000,
+    "split_m": 500
+   },
+   "description": "2000 m, 500 m splits",
+   "hex": "f17618010103030580000007d0050580000001f4140101130201014cf2"
+  },
+  {
+   "text": "5k",
+   "spec": {
+    "distance_m": 5000,
+    "split_m": 1000
+   },
+   "normalised": {
+    "kind": "distance",
+    "distance_m": 5000,
+    "split_m": 1000
+   },
+   "description": "5000 m, 1000 m splits",
+   "hex": "f1761801010303058000001388050580000003e8140101130201011ef2"
+  },
+  {
+   "text": "4x4",
+   "spec": {
+    "intervals": [
+     {
+      "time_s": 240,
+      "rest_s": 180
+     }
+    ],
+    "repeat": 4
+   },
+   "normalised": {
+    "kind": "variable",
+    "intervals": [
+     {
+      "time_s": 240,
+      "rest_s": 180
+     },
+     {
+      "time_s": 240,
+      "rest_s": 180
+     },
+     {
+      "time_s": 240,
+      "rest_s": 180
+     },
+     {
+      "time_s": 240,
+      "rest_s": 180
+     }
+    ]
+   },
+   "description": "4 x 4:00 / 3:00 rest",
+   "hex": "f1765718010001010817010003050000005dc0040200b414010118010117010003050000005dc0040200b414010118010217010003050000005dc0040200b414010118010317010003050000005dc0040200b41401011302010138f2"
+  },
+  {
+   "text": "pyramid",
+   "spec": {
+    "intervals": [
+     {
+      "distance_m": 250,
+      "rest_s": 60
+     },
+     {
+      "distance_m": 500,
+      "rest_s": 90
+     },
+     {
+      "distance_m": 750,
+      "rest_s": 120
+     },
+     {
+      "distance_m": 500,
+      "rest_s": 90
+     },
+     {
+      "distance_m": 250,
+      "rest_s": 60
+     }
+    ]
+   },
+   "normalised": {
+    "kind": "variable",
+    "intervals": [
+     {
+      "distance_m": 250,
+      "rest_s": 60
+     },
+     {
+      "distance_m": 500,
+      "rest_s": 90
+     },
+     {
+      "distance_m": 750,
+      "rest_s": 120
+     },
+     {
+      "distance_m": 500,
+      "rest_s": 90
+     },
+     {
+      "distance_m": 250,
+      "rest_s": 60
+     }
+    ]
+   },
+   "description": "5 intervals: 250 m / 1:00 rest, 500 m / 1:30 rest, 750 m / 2:00 rest, 500 m / 1:30 rest, 250 m / 1:00 rest",
+   "hex": "f1766b180100010108170101030580000000fa0402003c140101180101170101030580000001f40402005a140101180102170101030580000002ee04020078140101180103170101030580000001f40402005a140101180104170101030580000000fa0402003c140101130201010ef2"
+  },
+  {
+   "text": "8x500",
+   "spec": {
+    "intervals": [
+     {
+      "distance_m": 500,
+      "rest_s": 60
+     }
+    ],
+    "repeat": 8
+   },
+   "normalised": {
+    "kind": "variable",
+    "intervals": [
+     {
+      "distance_m": 500,
+      "rest_s": 60
+     },
+     {
+      "distance_m": 500,
+      "rest_s": 60
+     },
+     {
+      "distance_m": 500,
+      "rest_s": 60
+     },
+     {
+      "distance_m": 500,
+      "rest_s": 60
+     },
+     {
+      "distance_m": 500,
+      "rest_s": 60
+     },
+     {
+      "distance_m": 500,
+      "rest_s": 60
+     },
+     {
+      "distance_m": 500,
+      "rest_s": 60
+     },
+     {
+      "distance_m": 500,
+      "rest_s": 60
+     }
+    ]
+   },
+   "description": "8 x 500 m / 1:00 rest",
+   "hex": "f176a7180100010108170101030580000001f40402003c140101180101170101030580000001f40402003c140101180102170101030580000001f40402003c140101180103170101030580000001f40402003c140101180104170101030580000001f40402003c140101180105170101030580000001f40402003c140101180106170101030580000001f40402003c140101180107170101030580000001f40402003c14010113020101c8f2"
+  },
+  {
+   "text": "just_row",
+   "spec": {
+    "just_row": true,
+    "split_m": 500
+   },
+   "normalised": {
+    "kind": "just_row",
+    "split_m": 500
+   },
+   "description": "Just Row, 500 m splits",
+   "hex": "f1760e010101050580000001f4130201011df2"
+  },
+  {
+   "text": "250m/1:00r,500m,750m/2:00r",
+   "spec": {
+    "intervals": [
+     {
+      "distance_m": 250,
+      "rest_s": 60
+     },
+     {
+      "distance_m": 500
+     },
+     {
+      "distance_m": 750,
+      "rest_s": 120
+     }
+    ]
+   },
+   "normalised": {
+    "kind": "variable",
+    "intervals": [
+     {
+      "distance_m": 250,
+      "rest_s": 60
+     },
+     {
+      "distance_m": 500
+     },
+     {
+      "distance_m": 750,
+      "rest_s": 120
+     }
+    ]
+   },
+   "description": "3 intervals: 250 m / 1:00 rest, 500 m / rest until you row, 750 m / 2:00 rest",
+   "hex": "f1764d180100010108170101030580000000fa0402003c140101180101170104030580000001f404020000140101180102170101030580000002ee04020078140101010109050580000000001302010190f2"
+  },
+  {
+   "text": "12:00/4:00r@2:00",
+   "spec": {
+    "interval": {
+     "time_s": 720,
+     "rest_s": 240
+    },
+    "pace_s": 120
+   },
+   "normalised": {
+    "kind": "interval",
+    "interval": {
+     "time_s": 720,
+     "rest_s": 240,
+     "pace_s": 120
+    }
+   },
+   "description": "intervals of 12:00 / 4:00 rest @ 2:00/500m until stopped",
+   "hex": "f1761b01010603050000011940040200f300060400002ee0140101130201010af2"
+  },
+  {
+   "text": "300cal/50cal",
+   "spec": {
+    "calories": 300,
+    "split_cal": 50
+   },
+   "normalised": {
+    "kind": "calories",
+    "calories": 300,
+    "split_cal": 50
+   },
+   "description": "300 cal, 50 cal splits",
+   "hex": "f1761801010a0305400000012c050540000000321401011302010178f2"
+  }
+ ],
+ "terminate_hex": "f176041302010260f2",
+ "bad": [
+  "",
+  "abc",
+  "2000m/4:00",
+  "51x500m/1:00r",
+  "4:00/x",
+  "4x",
+  "0x500m/1:00r"
+ ]
+}

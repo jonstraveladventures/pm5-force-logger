@@ -98,6 +98,14 @@ class SyntaxTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             W.parse_amount("fast")
 
+    def test_calorie_piece_builds(self):
+        # the workout-type table calls it "calorie" while the kind is "calories"; this crashed before 2026-09-16
+        s = W.normalise(W.parse_spec("300cal/50cal"))
+        self.assertEqual((s["kind"], s["calories"], s["split_cal"]), ("calories", 300, 50))
+        body = W.unframe(W.build(s))[1]
+        self.assertEqual(body[1:4], bytes([W.SET_WORKOUTTYPE, 1, W.WT["calorie"]]))
+        self.assertEqual(W.describe(s), "300 cal, 50 cal splits")
+
     def test_default_splits(self):
         self.assertEqual(W.normalise({"distance_m": 5000})["split_m"], 1000)
         self.assertEqual(W.normalise({"distance_m": 2000})["split_m"], 400)

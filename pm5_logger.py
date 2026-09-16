@@ -12,6 +12,7 @@ saves all of it and shows it live in a browser.
                                            # (the dashboard has the same controls, so no terminal typing is needed)
     python pm5_logger.py --replay examples/sample_row.jsonl --loop   # try the dashboard, no rower needed
     python pm5_logger.py --reparse data/raw/<start>.jsonl            # rebuild a session file
+    python pm5_vo2.py data/sessions/*.json                           # watts at a set heart rate, VO2max estimate
 
 Before recording: close ErgData (or any other rowing app) and wake the PM5. The PM5 accepts
 one app connection at a time and stops advertising while anything holds it.
@@ -424,6 +425,19 @@ def upload_configured() -> bool:
     return bool(os.environ.get("CONCEPT2_REFRESH_TOKEN"))
 
 
+def fitness(sess_path: Path, data: dict) -> None:
+    """Watts at a fixed heart rate and a VO2max estimate, printed when PM5_MASS_KG and PM5_HRMAX
+    are set in .env (see pm5_vo2.py). Nothing is stored or uploaded."""
+    try:
+        import pm5_vo2
+        pm5_vo2.load_env()
+        cfg = pm5_vo2.settings()
+        if cfg:
+            print(pm5_vo2.report([(sess_path.stem, data)], cfg), flush=True)
+    except Exception as e:
+        print(f"fitness estimate skipped ({e})", flush=True)
+
+
 def post(sess_path: Path, data: dict) -> None:
     if not upload_configured():
         print("Concept2 Logbook upload not set up (see concept2.py); the row is saved locally.")
@@ -531,6 +545,7 @@ async def log_session(minutes: float | None, upload: bool = True, open_browser: 
     await asyncio.sleep(0.3)   # let the dashboard receive it before the server goes
     data = session.result({"started": start, **{k: v for k, v in meta.items() if v is not None}})
     save(sess_path, data)
+    fitness(sess_path, data)
     if upload:
         post(sess_path, data)
     server.close()
@@ -559,7 +574,9 @@ def reparse(raw_path: Path) -> None:
     session = Session()
     for t, short, b in events:
         session.feed(t, short, b)
-    save(OUT / "sessions" / f"{raw_path.stem}.json", session.result(meta))
+    sess_path, data = OUT / "sessions" / f"{raw_path.stem}.json", session.result(meta)
+    save(sess_path, data)
+    fitness(sess_path, data)
 
 
 async def replay(raw_path: Path, speed: float, loop: bool, open_browser: bool):

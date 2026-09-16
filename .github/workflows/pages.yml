@@ -1,0 +1,38 @@
+name: pages
+
+# Publishes web/ (the browser version) to GitHub Pages on every push to main.
+# The repository's Pages source must be set to "GitHub Actions" once, under Settings > Pages.
+on:
+  push:
+    branches: [main]
+    paths: ["web/**", "workouts.json", "examples/sample_row.jsonl", ".github/workflows/pages.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assemble the site (symlinks resolved, tests left out)
+        run: |
+          mkdir site
+          cp -RL web/. site/
+          rm -rf site/tests site/package.json
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v4
