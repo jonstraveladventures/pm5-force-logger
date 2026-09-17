@@ -48,8 +48,7 @@
   .tablewrap { overflow-x: auto; padding: 0 20px 20px; }
   button, select { background: #2f2f2d; color: var(--ink); border: 1px solid var(--grid); border-radius: 6px; padding: 4px 8px; font: inherit; font-size: .76rem; cursor: pointer; }
   #display { margin-left: 12px; font-size: .76rem; color: var(--ink2); }
-  #display summary { cursor: pointer; list-style: none; color: var(--ink3); }
-  #display[open] summary { color: var(--ink2); }
+  #display summary { cursor: pointer; list-style: none; color: var(--ink2); background: #2f2f2d; border: 1px solid var(--grid); border-radius: 6px; padding: 4px 8px; display: inline-block; }
   #display .sliders { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; padding: 6px 0 0; }
   #display .parts { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 4px 16px; padding: 4px 0 8px; max-width: 64em; }
   #display .pgroup { display: flex; flex-direction: column; gap: 2px; }
@@ -82,7 +81,7 @@
 <body>
 <header>
   <h1>PM5 Live</h1><span id="conn">connecting…</span>
-  <details id="display"><summary>Display ▾</summary><div class="sliders">
+  <details id="display"><summary>Change the display ▾</summary><div class="sliders">
     <label>Text <input type="range" id="ui_text" min="0.7" max="2" step="0.05"> <span id="ui_text_v"></span></label>
     <label>Curve height <input type="range" id="ui_h" min="140" max="640" step="10"> <span id="ui_h_v"></span></label>
     <label>Curve width <input type="range" id="ui_w" min="30" max="80" step="1"> <span id="ui_w_v"></span></label>

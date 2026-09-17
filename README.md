@@ -6,13 +6,13 @@ Record every stroke from a Concept2 PM5 over Bluetooth, including its force curv
 
 The Concept2 Logbook keeps the time, distance, pace, stroke rate and heart rate for each stroke, but not its force. ErgData shows the force curve while you row but, as far as I can tell, doesn't save it. The PM5 sends more than either keeps: drive length and time, recovery time, peak and average force, work per stroke, and the full force curve for every stroke. This project saves all of that data, shows it live and scores the shape of each force curve against published technique targets.
 
-![Thirty seconds of the dashboard during a row](docs/dashboard-row.gif)
+![The dashboard during a row](docs/dashboard-2026-09.gif)
 
-*Thirty seconds of one of my own 5 km rows, replayed at twice its speed.*
+*A minute of one of my own 5 km rows, played back through the browser version at about six times its speed.*
 
 ## What you get
 
-- A live dashboard at `http://localhost:8750`. It shows time, distance, pace, stroke rate, power, heart rate, peak force, drive length and time, drive-to-recovery ratio, distance and work per stroke, drag factor and calories. It also shows the force curve for your latest stroke, your last eight strokes, your session average and a reference shape, along with curve-shape measures against their targets, stroke-by-stroke trends and a table of recent strokes. The Display menu adjusts text size, the size of the curve, the tiles, the trend charts and the number of table rows, and switches off any part you don't want. Tick "customise" in that menu and the page becomes movable: drag any tile, chart or section to a new position, drag a corner to resize it, and press the ✕ on anything to hide it. Resizing a tile, a trend chart or the force-curve panel moves the matching slider, so the two never disagree. Everything you choose is remembered in the browser, and Reset puts it all back. The page can also set up the workout on the PM5 (see below).
+- A live dashboard at `http://localhost:8750`. It shows time, distance, pace, stroke rate, power, heart rate, peak force, drive length and time, drive-to-recovery ratio, distance and work per stroke, drag factor and calories. It also shows the force curve for your latest stroke, your last eight strokes, your session average and a reference shape, along with curve-shape measures against their targets, stroke-by-stroke trends and a table of recent strokes. The "Change the display" menu adjusts text size, the size of the curve, the tiles, the trend charts and the number of table rows, and switches off any part you don't want. Tick "customise" in that menu and the page itself becomes movable: drag any tile, chart or section to a new position, drag a corner to resize it, and press the ✕ on anything to hide it. Resizing a tile, a trend chart or the force-curve panel moves the matching slider, so the two never disagree. Everything you choose is remembered in the browser, and Reset puts it all back. The page can also set up the workout on the PM5 (see below).
 - Every stroke saved to disk: a raw log of every Bluetooth message and a session file with one record per stroke, including both force curves.
 - After each row, if you give it your mass and maximum heart rate, the watts you hold at a set heart rate and an estimate of VO2max (see below).
 - An optional upload to your Concept2 Logbook. ErgData cannot connect while this script holds the PM5's Bluetooth connection, so nothing else would send the row to the Logbook.
@@ -56,6 +56,8 @@ python pm5_logger.py --replay examples/sample_row.jsonl --loop --speed 4
 ```
 
 Your browser opens the dashboard and plays about three minutes of rowing. The sample is synthetic and was made by `examples/make_sample.py` in the same packet format that a PM5 sends. The only real rowing data in this repository is the animation above.
+
+The browser version has the same sample behind "Try the sample", and "Replay a saved log" plays back the raw log of any row you have saved, at twice its speed.
 
 ## Record a session
 

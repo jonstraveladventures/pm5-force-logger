@@ -133,29 +133,40 @@ $("wo_send").addEventListener("click", () => { const spec = $("wo_spec").value.t
 $("wo_spec").addEventListener("keydown", e => { if (e.key === "Enter") $("wo_send").click(); });
 $("wo_clear").addEventListener("click", () => program(null));
 
-// ---------- the sample row, no rower needed ----------
-async function playSample() {
+// ---------- replay: the built-in sample, or a raw log you saved ----------
+async function playRaw(text, label, speed = 2) {
   if (state.pm || state.sample) return;
   $("sample").disabled = true;
   let mine = null;
   try {
-    const text = await (await fetch("examples/sample_row.jsonl")).text();
     const { meta, events } = readRaw(text);
-    state.sample = true; state.session = new Session(emit); state.meta = { started: "sample", ...meta };
+    state.sample = true; state.session = new Session(emit); state.meta = { started: "replay", ...meta };
     mine = state.session;
-    H.reset({ replay: "the sample row (synthetic, at 2x)" }); if (meta.device) H.device(meta.device); render();
-    $("intro").hidden = true; setConn("playing the sample");
+    H.reset({ replay: `${label} (at ${speed}x)` }); if (meta.device) H.device(meta.device); render();
+    $("intro").hidden = true; setConn(`replaying ${label}`);
     let prev = events.length ? events[0][0] : 0;
     for (const [t, short, b] of events) {
       if (!state.sample) return;
-      await sleep(Math.max(0, (t - prev) / 2 * 1000)); prev = t;
+      await sleep(Math.max(0, (t - prev) / speed * 1000)); prev = t;
       state.session.feed(t, short, b);
     }
-    showFitness([["sample", state.session.result(state.meta)]]);
-    setConn("sample finished (not saved)"); $("banner").textContent = "the sample is synthetic and is not saved";
-  } catch (e) { setConn(`could not load the sample: ${e.message}`, "err"); }
-  finally { state.sample = false; if (state.session === mine) state.session = null; $("sample").disabled = false; }   // a connect during the sample owns the session now
+    showFitness([[label, state.session.result(state.meta)]]);
+    setConn(`${label} finished (a replay is not saved)`); $("banner").textContent = "a replay is not saved";
+  } catch (e) { setConn(`could not replay: ${e.message}`, "err"); }
+  finally { state.sample = false; if (state.session === mine) state.session = null; $("sample").disabled = false; }   // a connect during a replay owns the session now
 }
+const playSample = async () => playRaw(await (await fetch("examples/sample_row.jsonl")).text(), "the sample row (synthetic)");
+$("replayfile").addEventListener("change", async e => {
+  const f = e.target.files && e.target.files[0]; if (!f) return;
+  playRaw(await f.text(), f.name); e.target.value = "";
+});
+window.pm5Replay = playRaw;    // for recording the README animation from a saved row
+// ?replay=<file in this folder>[&speed=N] plays a raw log straight away, which is how the
+// README animation is recorded (headless Chrome, one frame per step of virtual time)
+(async () => {
+  const q = new URLSearchParams(location.search), f = q.get("replay");
+  if (f && /^[\w.-]+$/.test(f)) playRaw(await (await fetch(f)).text(), q.get("label") || f, Number(q.get("speed")) || 1);
+})();
 
 // ---------- fitness settings and report ----------
 const FIT = { fit_mass: "PM5_MASS_KG", fit_hrmax: "PM5_HRMAX", fit_rest: "PM5_HR_REST", fit_zone: "PM5_ZONE_HR" };

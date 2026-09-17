@@ -64,7 +64,8 @@
   button.primary { background: var(--s1); border-color: var(--s1); color: #fff; }
   input[type=text], input[type=number] { background: #2f2f2d; color: var(--ink); border: 1px solid var(--grid); border-radius: 6px; padding: 4px 8px; font: inherit; font-size: .82rem; }
   details.menu { font-size: .76rem; color: var(--ink2); }
-  details.menu summary { cursor: pointer; list-style: none; color: var(--ink3); }
+  .filebtn { background: #2f2f2d; color: var(--ink); border: 1px solid var(--grid); border-radius: 6px; padding: 4px 8px; font-size: .76rem; cursor: pointer; }
+  details.menu summary { cursor: pointer; list-style: none; color: var(--ink2); background: #2f2f2d; border: 1px solid var(--grid); border-radius: 6px; padding: 4px 8px; display: inline-block; }
   details.menu[open] summary { color: var(--ink2); }
   #display .sliders { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; padding: 6px 0 0; }
   #display .parts { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 4px 16px; padding: 4px 0 8px; max-width: 64em; }
@@ -123,8 +124,9 @@
   <button id="connect" class="primary">Connect to PM5</button>
   <button id="stop" hidden>Stop and save</button>
   <button id="sample">Try the sample</button>
+  <label class="filebtn" title="Play back the raw log of a row you saved earlier">Replay a saved log<input type="file" id="replayfile" accept=".jsonl,application/x-ndjson" hidden></label>
   <span id="conn">not connected</span>
-  <details id="display" class="menu"><summary>Display ▾</summary><div class="sliders">
+  <details id="display" class="menu"><summary>Change the display ▾</summary><div class="sliders">
     <label>Text <input type="range" id="ui_text" min="0.7" max="2" step="0.05"> <span id="ui_text_v"></span></label>
     <label>Curve height <input type="range" id="ui_h" min="140" max="640" step="10"> <span id="ui_h_v"></span></label>
     <label>Curve width <input type="range" id="ui_w" min="30" max="80" step="1"> <span id="ui_w_v"></span></label>
