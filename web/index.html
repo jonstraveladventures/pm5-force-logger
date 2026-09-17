@@ -73,8 +73,10 @@
   .hidden-part { display: none !important; }
   .hostx { position: relative; }
   .arranging { outline: 1px dashed var(--grid); outline-offset: 2px; cursor: move; resize: both; overflow: hidden; min-width: 90px; min-height: 60px; }
-  .arranging * { pointer-events: none; }
-  .arranging .hidex { pointer-events: auto; }
+  /* controls inside a part stay out of the way of a drag, but parts nested in a part (a tile in
+     the tiles grid, a chart in the trends grid) must still take the mouse themselves */
+  .arranging input, .arranging select, .arranging textarea, .arranging a, .arranging canvas, .arranging button:not(.hidex) { pointer-events: none; }
+  .arranging .hidex, .arranging .arranging { pointer-events: auto; }
   .hidex { position: absolute; top: 4px; right: 4px; z-index: 5; background: rgba(0, 0, 0, .5); border: 1px solid var(--grid); color: var(--ink2); border-radius: 4px; font-size: .7rem; line-height: 1; padding: 3px 5px; cursor: pointer; }
   /* a long explanation kept out of the way until it is wanted */
   .hint { position: relative; color: var(--ink3); cursor: help; border-bottom: 1px dotted var(--ink3); }
