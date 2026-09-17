@@ -59,6 +59,7 @@ DEVICE_INFO = {0x0011: "model", 0x0012: "serial", 0x0013: "hardware_rev",
 IDLE_STOP_S = 600          # stop 10 min after the last stroke (the PM5 sends status every second while awake)
 AFTER_END_S = 75           # the PM5 re-sends its summary with recovery HR after 1 min of rest
 CURVE_MATCH_S = 3.0        # a force curve belongs to the stroke record within this many seconds
+MAX_BODY_BYTES = 64 * 1024  # reject oversized request bodies to the local dashboard API
 
 WORKOUT_STATE = {0: "wait_to_begin", 1: "workout_row", 2: "countdown_pause", 3: "interval_rest",
                  4: "interval_work_time", 5: "interval_work_distance",
@@ -306,6 +307,9 @@ class Hub:
             while (line := await reader.readline()) not in (b"\r\n", b"\n", b""):
                 if line.lower().startswith(b"content-length:"):
                     length = int(line.split(b":", 1)[1])
+            if length > MAX_BODY_BYTES:
+                self._json(writer, 400, {"error": "request body too large"})
+                return
             body = await reader.readexactly(length) if length else b""
             if path.startswith("/events"):
                 writer.write(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n"
