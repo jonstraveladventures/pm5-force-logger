@@ -72,6 +72,9 @@
   #display .pgroup b { color: var(--ink3); font-weight: 600; }
   .hidden-part { display: none !important; }
   .hostx { position: relative; }
+  .arranging { outline: 1px dashed var(--grid); outline-offset: 2px; cursor: move; resize: both; overflow: hidden; min-width: 90px; min-height: 60px; }
+  .arranging * { pointer-events: none; }
+  .arranging .hidex { pointer-events: auto; }
   .hidex { position: absolute; top: 4px; right: 4px; z-index: 5; background: rgba(0, 0, 0, .5); border: 1px solid var(--grid); color: var(--ink2); border-radius: 4px; font-size: .7rem; line-height: 1; padding: 3px 5px; cursor: pointer; }
   /* a long explanation kept out of the way until it is wanted */
   .hint { position: relative; color: var(--ink3); cursor: help; border-bottom: 1px dotted var(--ink3); }
@@ -126,7 +129,7 @@
     <label>Tile size <input type="range" id="ui_tile" min="110" max="360" step="10"> <span id="ui_tile_v"></span></label>
     <label>Trend height <input type="range" id="ui_trend" min="70" max="300" step="10"> <span id="ui_trend_v"></span></label>
     <label>Table rows <input type="range" id="ui_rows" min="3" max="30" step="1"> <span id="ui_rows_v"></span></label>
-    <label><input type="checkbox" id="ui_customise"> click parts off (✕)</label>
+    <label><input type="checkbox" id="ui_customise"> customise: drag parts, resize by the corner, ✕ to hide</label>
     <button id="ui_showall">Show everything</button>
     <button id="ui_reset">Reset</button>
   </div><div class="parts" id="ui_parts"></div></details>
@@ -179,7 +182,7 @@
 
 <section class="tiles" id="tiles"></section>
 
-<main>
+<main id="main">
   <div class="panel" id="panel_curve">
     <div class="row" style="justify-content: space-between">
       <h2>Force curve</h2>
@@ -215,7 +218,7 @@
   </tr></thead><tbody></tbody></table>
 </div>
 
-<section class="more">
+<section class="more" id="more">
   <div class="panel" id="fitness">
     <h2>Watts at a set heart rate, and a VO2max estimate</h2>
     <div class="fields">

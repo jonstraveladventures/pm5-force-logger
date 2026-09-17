@@ -249,6 +249,76 @@ function applyHidden() {
   }
 }
 
+
+// ---------- arrange: drag the parts about, resize them by their corner ----------
+// Order is saved per container (which parts sit in which order inside the tiles grid, the
+// trends grid, the two-panel row and the page itself). Resizing a tile, a trend panel or the
+// force-curve panel sets the same value its slider does, so the two stay in step.
+const arrangeIds = () => [...allParts().map(([id]) => id), "tiles", "main", "trends", "more"].filter(id => $(id));
+const loadLayout = () => { try { return JSON.parse(localStorage.getItem("pm5_layout")) || {}; } catch { return {}; } };
+const saveLayout = l => { try { localStorage.setItem("pm5_layout", JSON.stringify(l)); } catch { /* private mode */ } };
+const containerId = el => (el.parentElement === document.body ? "body" : el.parentElement.id || null);
+
+function applyOrder() {
+  const { order = {} } = loadLayout();
+  for (const [cid, ids] of Object.entries(order)) {
+    const parent = cid === "body" ? document.body : $(cid);
+    if (!parent) continue;
+    for (const id of ids) { const el = $(id); if (el && el.parentElement === parent) parent.appendChild(el); }
+  }
+}
+function rememberOrder(cid) {
+  const parent = cid === "body" ? document.body : $(cid);
+  const ids = [...parent.children].map(c => c.id).filter(id => id && arrangeIds().includes(id));
+  const l = loadLayout(); l.order = { ...(l.order || {}), [cid]: ids }; saveLayout(l);
+}
+
+let dragging = null;
+function onDragStart(e) { e.stopPropagation(); dragging = e.currentTarget; e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", dragging.id); }
+function onDragOver(e) {
+  if (!dragging || e.currentTarget === dragging || containerId(e.currentTarget) !== containerId(dragging)) return;
+  e.preventDefault(); e.stopPropagation();
+  const el = e.currentTarget, r = el.getBoundingClientRect();
+  const after = (r.width > r.height * 1.5 ? e.clientX - r.left > r.width / 2 : e.clientY - r.top > r.height / 2);
+  el.parentElement.insertBefore(dragging, after ? el.nextSibling : el);
+}
+function onDrop(e) { if (!dragging) return; e.preventDefault(); e.stopPropagation(); rememberOrder(containerId(dragging)); dragging = null; render(); }
+
+/** A resized part sets the matching slider, so one control doesn't contradict the other. */
+function onResized(el) {
+  // only a size the user dragged counts: resize writes it into the element's own style, while
+  // the layout's own sizes come from the variables, and reading those back would feed on itself
+  const w = parseFloat(el.style.width), h = parseFloat(el.style.height);
+  if (!w && !h) return;
+  const set = (k, v) => { const s = $("ui_" + k); if (!s) return; s.value = Math.round(v); applyUI(); };
+  if (el.id.startsWith("tile_")) { if (w) set("tile", Math.min(360, Math.max(110, w / (parseFloat(css("--text")) || 1)))); }
+  else if (el.id.startsWith("trend")) { if (h) set("trend", Math.min(300, Math.max(70, h - 44))); }
+  else if (el.id === "panel_curve" || el.id === "panel_shape") {
+    const m = $("main"), full = m ? m.clientWidth : window.innerWidth;
+    if (w) set("w", Math.min(80, Math.max(30, el.id === "panel_curve" ? 100 * w / full : 100 - 100 * w / full)));
+    if (h && el.id === "panel_curve") set("h", Math.min(640, Math.max(140, h - 170)));
+  }
+}
+
+function applyArrange() {
+  const on = $("ui_customise") && $("ui_customise").checked;
+  for (const id of arrangeIds()) {
+    const el = $(id);
+    el.classList.toggle("arranging", on);
+    el.draggable = on;
+    el.ondragstart = on ? onDragStart : null;
+    el.ondragover = on ? onDragOver : null;
+    el.ondrop = on ? onDrop : null;
+    el.ondragend = on ? () => { dragging = null; } : null;
+  }
+  if (on && !applyArrange.observer) {
+    applyArrange.observer = new ResizeObserver(es => { if ($("ui_customise").checked) for (const e of es) onResized(e.target); });
+    for (const id of ["panel_curve", "panel_shape", "trend0", "trend1", "trend2", "trend3", "trend4", ...TILE_DEFS.map(([k]) => "tile_" + k)])
+      if ($(id)) applyArrange.observer.observe($(id));
+    document.addEventListener("pointerup", () => document.querySelectorAll(".arranging").forEach(el => { el.style.width = ""; el.style.height = ""; }));
+  }
+}
+
 function applyUI(save = true) {
   const cur = {};
   for (const [k, [prop, , show, cssv]] of Object.entries(UI)) {
@@ -260,12 +330,14 @@ function applyUI(save = true) {
   cur.hidden = [...hidden];
   if (save) { try { localStorage.setItem("pm5_display", JSON.stringify(cur)); } catch { /* private mode */ } }
   applyHidden();
+  applyArrange();
   render();
 }
 (function initUI() {
   const saved = loadUI();
   for (const [k, [, dflt]] of Object.entries(UI)) { const el = $("ui_" + k); if (!el) continue; el.value = saved[k] ?? dflt; el.addEventListener("input", () => applyUI()); }
   for (const id of saved.hidden || []) hidden.add(id);
+  applyOrder();
   $("ui_parts").innerHTML = partGroups().map(([g, items]) =>
     `<div class="pgroup"><b>${g}</b>${items.map(([id, l]) => `<label><input type="checkbox" data-part="${id}"> ${l}</label>`).join("")}</div>`).join("");
   $("ui_parts").addEventListener("change", e => {
@@ -277,7 +349,7 @@ function applyUI(save = true) {
   $("ui_showall").addEventListener("click", () => { hidden.clear(); applyUI(); });
   $("ui_reset").addEventListener("click", () => {
     for (const [k, [, dflt]] of Object.entries(UI)) { const el = $("ui_" + k); if (el) el.value = dflt; }
-    hidden.clear(); applyUI();
+    hidden.clear(); saveLayout({}); location.reload();          // the saved order is undone by reloading the page as written
   });
   applyUI(false);
 })();
