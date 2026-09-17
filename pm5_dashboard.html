@@ -8,7 +8,7 @@
   :root {
     --surface: #1a1a19; --panel: #232322; --grid: #3a3a38; --ink: #ffffff; --ink2: #c3c2b7; --ink3: #8d8c84;
     --s1: #3987e5; --s2: #d95926; --s3: #199e70; --good: #3aa655; --warn: #d9a300;
-    --text: 1; --curve-h: 270px; --curve-w: 56%;   /* the Display sliders set these; saved per browser */
+    --text: 1; --curve-h: 270px; --curve-w: 56%; --tile-w: 150px; --trend-h: 120px;   /* the Display sliders set these; saved per browser */
   }
   html { font-size: calc(17px * var(--text)); }
   * { box-sizing: border-box; }
@@ -18,7 +18,7 @@
   #conn { font-size: .76rem; color: var(--ink3); }
   #conn.live { color: var(--good); }
   #banner { margin-left: auto; font-size: .76rem; color: var(--ink2); }
-  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(calc(150px * var(--text)), 1fr)); gap: 10px; padding: 8px 20px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(calc(var(--tile-w) * var(--text)), 1fr)); gap: 10px; padding: 8px 20px; }
   .tile { background: var(--panel); border-radius: 10px; padding: 10px 12px; }
   .tile .label { font-size: .82rem; color: var(--ink3); text-transform: uppercase; letter-spacing: .04em; }
   .tile .value { font-size: clamp(1.5rem, calc(2.5vw * var(--text)), 2.4rem); font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.1; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: clip; }
@@ -40,7 +40,7 @@
   .flag { font-size: .94rem; font-weight: 600; }
   .flag.ok { color: var(--good); } .flag.off { color: var(--warn); }
   .trends { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; padding: 0 20px 12px; }
-  .trends canvas { height: 120px; }
+  .trends canvas { height: var(--trend-h); }
   table { width: 100%; border-collapse: collapse; font-size: .88rem; font-variant-numeric: tabular-nums; }
   th, td { text-align: right; padding: 4px 7px; border-bottom: 1px solid var(--grid); }
   th:first-child, td:first-child { text-align: left; }
@@ -51,6 +51,16 @@
   #display summary { cursor: pointer; list-style: none; color: var(--ink3); }
   #display[open] summary { color: var(--ink2); }
   #display .sliders { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; padding: 6px 0 0; }
+  #display .parts { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 4px 16px; padding: 4px 0 8px; max-width: 64em; }
+  #display .pgroup { display: flex; flex-direction: column; gap: 2px; }
+  #display .pgroup b { color: var(--ink3); font-weight: 600; }
+  .hidden-part { display: none !important; }
+  .hostx { position: relative; }
+  .hidex { position: absolute; top: 4px; right: 4px; z-index: 5; background: rgba(0, 0, 0, .5); border: 1px solid var(--grid); color: var(--ink2); border-radius: 4px; font-size: .7rem; line-height: 1; padding: 3px 5px; cursor: pointer; }
+  /* a long explanation kept out of the way until it is wanted */
+  .hint { position: relative; color: var(--ink3); cursor: help; border-bottom: 1px dotted var(--ink3); }
+  .hint .tip { display: none; position: absolute; left: 0; bottom: 1.4em; z-index: 10; width: min(34em, 80vw); background: #2f2f2d; border: 1px solid var(--grid); border-radius: 8px; padding: 8px 10px; color: var(--ink2); font-size: .82rem; line-height: 1.35; box-shadow: 0 6px 20px rgba(0, 0, 0, .5); cursor: auto; }
+  .hint:hover .tip, .hint:focus .tip, .hint:focus-within .tip { display: block; }
   #display label { display: inline-flex; gap: 6px; align-items: center; white-space: nowrap; }
   #display input[type=range] { width: 110px; }
   .setup { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; padding: 6px 20px 2px; font-size: .82rem; color: var(--ink2); }
@@ -71,8 +81,13 @@
     <label>Text <input type="range" id="ui_text" min="0.7" max="2" step="0.05"> <span id="ui_text_v"></span></label>
     <label>Curve height <input type="range" id="ui_h" min="140" max="640" step="10"> <span id="ui_h_v"></span></label>
     <label>Curve width <input type="range" id="ui_w" min="30" max="80" step="1"> <span id="ui_w_v"></span></label>
+    <label>Tile size <input type="range" id="ui_tile" min="110" max="360" step="10"> <span id="ui_tile_v"></span></label>
+    <label>Trend height <input type="range" id="ui_trend" min="70" max="300" step="10"> <span id="ui_trend_v"></span></label>
+    <label>Table rows <input type="range" id="ui_rows" min="3" max="30" step="1"> <span id="ui_rows_v"></span></label>
+    <label><input type="checkbox" id="ui_customise"> click parts off (✕)</label>
+    <button id="ui_showall">Show everything</button>
     <button id="ui_reset">Reset</button>
-  </div></details>
+  </div><div class="parts" id="ui_parts"></div></details>
   <span id="banner"></span>
 </header>
 
@@ -88,7 +103,7 @@
 <section class="tiles" id="tiles"></section>
 
 <main>
-  <div class="panel">
+  <div class="panel" id="panel_curve">
     <div class="row" style="justify-content: space-between">
       <h2>Force curve</h2>
       <div class="row">
@@ -106,7 +121,7 @@
     <canvas id="curve"></canvas>
     <div id="hover"></div>
   </div>
-  <div class="panel">
+  <div class="panel" id="panel_shape">
     <div class="row" style="justify-content: space-between"><h2 id="shapeTitle">Curve shape, this stroke</h2>
       <div class="row"><label>Targets <select id="school"><option value="kleshnev">Kleshnev (on-water crews)</option><option value="rp3">RP3 (rounded stroke)</option></select></label>
       <label>RP3 bands <select id="bands"><option value="off">off</option><option value="men">men</option><option value="women">women</option></select></label>
@@ -117,7 +132,7 @@
 
 <section class="trends" id="trends"></section>
 
-<div class="tablewrap">
+<div class="tablewrap" id="tablewrap">
   <table id="table"><thead><tr>
     <th>Stroke</th><th>Drive m</th><th>Drive s</th><th>Recov s</th><th>Ratio</th><th>Dist/stroke m</th><th>Peak lbf</th><th>Avg lbf</th><th>Work J</th><th>Power W</th><th>Peak pos</th><th>Rect idx</th><th>HR</th>
   </tr></thead><tbody></tbody></table>
@@ -196,7 +211,7 @@ const TILE_DEFS = [
   ["time", "Time"], ["dist", "Distance"], ["pace", "Pace /500m"], ["rate", "Rate"], ["power", "Power"], ["hr", "Heart rate"],
   ["peak", "Peak force"], ["drive", "Drive"], ["ratio", "Drive : recovery"], ["stroke", "Per stroke"], ["drag", "Drag factor"], ["cal", "Calories"],
 ];
-document.getElementById("tiles").innerHTML = TILE_DEFS.map(([k, l]) => `<div class="tile"><div class="label">${l}</div><div class="value" id="v_${k}">—</div><div class="sub" id="s_${k}"></div></div>`).join("");
+document.getElementById("tiles").innerHTML = TILE_DEFS.map(([k, l]) => `<div class="tile" id="tile_${k}"><div class="label">${l}</div><div class="value" id="v_${k}">—</div><div class="sub" id="s_${k}"></div></div>`).join("");
 const setTile = (k, v, sub = "") => { document.getElementById("v_" + k).textContent = v; document.getElementById("s_" + k).textContent = sub; };
 function renderTiles() {
   const st = S.status, last = lastStroke();
@@ -300,7 +315,7 @@ const TRENDS = [
   ["Drive length (m)", s => s.drive_length_m, null],
   ["Power (W)", s => s.power_w, null],
 ];
-document.getElementById("trends").innerHTML = TRENDS.map((t, i) => `<div class="panel"><h2>${t[0]}${t[2] ? ` <span style="font-weight:400;color:var(--ink3)">· shaded: target</span>` : ""}</h2><canvas id="tr${i}"></canvas></div>`).join("");
+document.getElementById("trends").innerHTML = TRENDS.map((t, i) => `<div class="panel" id="trend${i}"><h2>${t[0]}${t[2] ? ` <span style="font-weight:400;color:var(--ink3)">· shaded: target</span>` : ""}</h2><canvas id="tr${i}"></canvas></div>`).join("");
 function drawTrends() {
   const list = [...S.strokes.values()].sort((a, b) => a.stroke_count - b.stroke_count);
   TRENDS.forEach(([name, fn, bandFn], i) => { const band = bandFn ? bandFn() : null;
@@ -323,7 +338,7 @@ function drawTrends() {
 }
 
 function renderTable() {
-  const list = [...S.strokes.values()].sort((a, b) => b.stroke_count - a.stroke_count).slice(0, 12);
+  const list = [...S.strokes.values()].sort((a, b) => b.stroke_count - a.stroke_count).slice(0, uiValue("rows"));
   document.querySelector("#table tbody").innerHTML = list.map(s => { const m = metrics(s[src()]); const ratio = s.recovery_time_s && s.drive_time_s ? `1:${n1(s.recovery_time_s / s.drive_time_s)}` : "—";
     return `<tr><td>${s.stroke_count}</td><td>${n2(s.drive_length_m)}</td><td>${n2(s.drive_time_s)}</td><td>${n2(s.recovery_time_s)}</td><td>${ratio}</td><td>${n2(s.stroke_distance_m)}</td><td>${n0(s.peak_force_lbf)}</td><td>${n0(s.avg_force_lbf)}</td><td>${n0(s.work_j)}</td><td>${n0(s.power_w)}</td><td>${m ? m.a100 + "%" : "—"}</td><td>${m ? n0(m.ram) + "%" : "—"}</td><td>${s.hr ? s.hr : "—"}</td></tr>`; }).join("");
 }
@@ -331,24 +346,77 @@ function renderTable() {
 let pending = false;
 function render() { if (pending) return; pending = true; requestAnimationFrame(() => { pending = false; renderTiles(); drawCurve(); renderMetrics(); drawTrends(); renderTable(); }); }
 window.addEventListener("resize", render);
-// ---------- display sliders: text size, curve height and width; remembered per browser ----------
+// ---------- display: sizes and what is shown, remembered per browser ----------
+// Sliders set a CSS variable (a null property means the value is only read by the code, like the
+// number of table rows). Any part in partGroups() can be switched off from the menu, or with the
+// ✕ that "click parts off" puts on each one.
 const UI = { text: ["--text", 1, v => `${Math.round(v * 100)}%`, v => v],
              h: ["--curve-h", 270, v => `${v} px`, v => `${v}px`],
-             w: ["--curve-w", 56, v => `${v}%`, v => `${v}%`] };
+             w: ["--curve-w", 56, v => `${v}%`, v => `${v}%`],
+             tile: ["--tile-w", 150, v => `${v} px`, v => `${v}px`],
+             trend: ["--trend-h", 120, v => `${v} px`, v => `${v}px`],
+             rows: [null, 12, v => `${v}`, v => v] };
+const hidden = new Set();
 function loadUI() { try { return JSON.parse(localStorage.getItem("pm5_display")) || {}; } catch { return {}; } }
+const uiValue = k => { const el = document.getElementById("ui_" + k); const v = el ? parseFloat(el.value) : NaN; return Number.isNaN(v) ? UI[k][1] : v; };
+
+/** Everything that can be hidden, in the order the menu lists it. Parts a page doesn't have (the
+ *  Python-served dashboard has no guided or fitness panel) are left out. */
+function partGroups() {
+  return [["Tiles", TILE_DEFS.map(([k, l]) => ["tile_" + k, l])],
+          ["Charts", [["panel_curve", "Force curve"], ["panel_shape", "Curve shape"], ...TRENDS.map((t, i) => ["trend" + i, t[0].replace(/ \(.*/, "")])]],
+          ["Sections", [["setup", "Set up the PM5"], ["guided", "Guided session"], ["tablewrap", "Stroke table"], ["fitness", "Fitness panel"], ["sessions", "Saved rows"]]]]
+    .map(([g, items]) => [g, items.filter(([id]) => document.getElementById(id))]).filter(([, items]) => items.length);
+}
+const allParts = () => partGroups().flatMap(([, items]) => items);
+
+function applyHidden() {
+  for (const [id] of allParts()) document.getElementById(id).classList.toggle("hidden-part", hidden.has(id));
+  const m = document.querySelector("main");
+  if (m) m.style.gridTemplateColumns = hidden.has("panel_curve") || hidden.has("panel_shape") ? "1fr" : "";
+  const tr = document.getElementById("trends"); if (tr) tr.classList.toggle("hidden-part", TRENDS.every((_, i) => hidden.has("trend" + i)));
+  document.querySelectorAll("#ui_parts input[type=checkbox]").forEach(cb => { cb.checked = !hidden.has(cb.dataset.part); });
+  document.querySelectorAll(".hidex").forEach(b => b.remove());
+  if (!document.getElementById("ui_customise") || !document.getElementById("ui_customise").checked) return;
+  for (const [id, label] of allParts()) {
+    if (hidden.has(id)) continue;
+    const el = document.getElementById(id), b = document.createElement("button");
+    el.classList.add("hostx"); b.className = "hidex"; b.textContent = "✕"; b.title = `Hide ${label}`;
+    b.addEventListener("click", ev => { ev.stopPropagation(); ev.preventDefault(); hidden.add(id); applyUI(); });
+    el.appendChild(b);
+  }
+}
+
 function applyUI(save = true) {
   const cur = {};
-  for (const [k, [prop, dflt, show, cssv]] of Object.entries(UI)) {
-    const el = document.getElementById("ui_" + k); const v = parseFloat(el.value); cur[k] = v;
-    document.documentElement.style.setProperty(prop, cssv(v)); document.getElementById(`ui_${k}_v`).textContent = show(v);
+  for (const [k, [prop, , show, cssv]] of Object.entries(UI)) {
+    const el = document.getElementById("ui_" + k); if (!el) continue;
+    const v = parseFloat(el.value); cur[k] = v;
+    if (prop) document.documentElement.style.setProperty(prop, cssv(v));
+    document.getElementById(`ui_${k}_v`).textContent = show(v);
   }
-  if (save) { try { localStorage.setItem("pm5_display", JSON.stringify(cur)); } catch {} }
+  cur.hidden = [...hidden];
+  if (save) { try { localStorage.setItem("pm5_display", JSON.stringify(cur)); } catch { /* private mode */ } }
+  applyHidden();
   render();
 }
 function initUI() {
   const saved = loadUI();
-  for (const [k, [, dflt]] of Object.entries(UI)) { const el = document.getElementById("ui_" + k); el.value = saved[k] ?? dflt; el.addEventListener("input", () => applyUI()); }
-  document.getElementById("ui_reset").addEventListener("click", () => { for (const [k, [, dflt]] of Object.entries(UI)) document.getElementById("ui_" + k).value = dflt; applyUI(); });
+  for (const [k, [, dflt]] of Object.entries(UI)) { const el = document.getElementById("ui_" + k); if (!el) continue; el.value = saved[k] ?? dflt; el.addEventListener("input", () => applyUI()); }
+  for (const id of saved.hidden || []) hidden.add(id);
+  document.getElementById("ui_parts").innerHTML = partGroups().map(([g, items]) =>
+    `<div class="pgroup"><b>${g}</b>${items.map(([id, l]) => `<label><input type="checkbox" data-part="${id}"> ${l}</label>`).join("")}</div>`).join("");
+  document.getElementById("ui_parts").addEventListener("change", e => {
+    const cb = e.target.closest("input[data-part]"); if (!cb) return;
+    if (cb.checked) hidden.delete(cb.dataset.part); else hidden.add(cb.dataset.part);
+    applyUI();
+  });
+  document.getElementById("ui_customise").addEventListener("change", () => applyUI());
+  document.getElementById("ui_showall").addEventListener("click", () => { hidden.clear(); applyUI(); });
+  document.getElementById("ui_reset").addEventListener("click", () => {
+    for (const [k, [, dflt]] of Object.entries(UI)) { const el = document.getElementById("ui_" + k); if (el) el.value = dflt; }
+    hidden.clear(); applyUI();
+  });
   applyUI(false);
 }
 initUI();

@@ -73,7 +73,7 @@ const TILE_DEFS = [
   ["time", "Time"], ["dist", "Distance"], ["pace", "Pace /500m"], ["rate", "Rate"], ["power", "Power"], ["hr", "Heart rate"],
   ["peak", "Peak force"], ["drive", "Drive"], ["ratio", "Drive : recovery"], ["stroke", "Per stroke"], ["drag", "Drag factor"], ["cal", "Calories"],
 ];
-$("tiles").innerHTML = TILE_DEFS.map(([k, l]) => `<div class="tile"><div class="label">${l}</div><div class="value" id="v_${k}">—</div><div class="sub" id="s_${k}"></div></div>`).join("");
+$("tiles").innerHTML = TILE_DEFS.map(([k, l]) => `<div class="tile" id="tile_${k}"><div class="label">${l}</div><div class="value" id="v_${k}">—</div><div class="sub" id="s_${k}"></div></div>`).join("");
 const setTile = (k, v, sub = "") => { $("v_" + k).textContent = v; $("s_" + k).textContent = sub; };
 function renderTiles() {
   const st = S.status, last = lastStroke();
@@ -176,7 +176,7 @@ const TRENDS = [
   ["Drive length (m)", s => s.drive_length_m, null],
   ["Power (W)", s => s.power_w, null],
 ];
-$("trends").innerHTML = TRENDS.map((t, i) => `<div class="panel"><h2>${t[0]}${t[2] ? ` <span style="font-weight:400;color:var(--ink3)">· shaded: target</span>` : ""}</h2><canvas id="tr${i}"></canvas></div>`).join("");
+$("trends").innerHTML = TRENDS.map((t, i) => `<div class="panel" id="trend${i}"><h2>${t[0]}${t[2] ? ` <span style="font-weight:400;color:var(--ink3)">· shaded: target</span>` : ""}</h2><canvas id="tr${i}"></canvas></div>`).join("");
 function drawTrends() {
   const list = [...S.strokes.values()].sort((a, b) => a.stroke_count - b.stroke_count);
   TRENDS.forEach(([name, fn, bandFn], i) => { const band = bandFn ? bandFn() : null;
@@ -199,7 +199,7 @@ function drawTrends() {
 }
 
 function renderTable() {
-  const list = [...S.strokes.values()].sort((a, b) => b.stroke_count - a.stroke_count).slice(0, 12);
+  const list = [...S.strokes.values()].sort((a, b) => b.stroke_count - a.stroke_count).slice(0, uiValue("rows"));
   document.querySelector("#table tbody").innerHTML = list.map(s => { const m = metrics(s[src()]); const ratio = s.recovery_time_s && s.drive_time_s ? `1:${n1(s.recovery_time_s / s.drive_time_s)}` : "—";
     return `<tr><td>${s.stroke_count}</td><td>${n2(s.drive_length_m)}</td><td>${n2(s.drive_time_s)}</td><td>${n2(s.recovery_time_s)}</td><td>${ratio}</td><td>${n2(s.stroke_distance_m)}</td><td>${n0(s.peak_force_lbf)}</td><td>${n0(s.avg_force_lbf)}</td><td>${n0(s.work_j)}</td><td>${n0(s.power_w)}</td><td>${m ? m.a100 + "%" : "—"}</td><td>${m ? n0(m.ram) + "%" : "—"}</td><td>${s.hr ? s.hr : "—"}</td></tr>`; }).join("");
 }
@@ -208,24 +208,77 @@ let pending = false;
 export function render() { if (pending) return; pending = true; requestAnimationFrame(() => { pending = false; renderTiles(); drawCurve(); renderMetrics(); drawTrends(); renderTable(); }); }
 window.addEventListener("resize", render);
 
-// ---------- display sliders: text size, curve height and width; remembered per browser ----------
+// ---------- display: sizes and what is shown, remembered per browser ----------
+// Sliders set a CSS variable (a null property means the value is only read by the code, like the
+// number of table rows). Any part in partGroups() can be switched off from the menu, or with the
+// ✕ that "click parts off" puts on each one.
 const UI = { text: ["--text", 1, v => `${Math.round(v * 100)}%`, v => v],
              h: ["--curve-h", 270, v => `${v} px`, v => `${v}px`],
-             w: ["--curve-w", 56, v => `${v}%`, v => `${v}%`] };
+             w: ["--curve-w", 56, v => `${v}%`, v => `${v}%`],
+             tile: ["--tile-w", 150, v => `${v} px`, v => `${v}px`],
+             trend: ["--trend-h", 120, v => `${v} px`, v => `${v}px`],
+             rows: [null, 12, v => `${v}`, v => v] };
+const hidden = new Set();
 function loadUI() { try { return JSON.parse(localStorage.getItem("pm5_display")) || {}; } catch { return {}; } }
+const uiValue = k => { const el = $("ui_" + k); const v = el ? parseFloat(el.value) : NaN; return Number.isNaN(v) ? UI[k][1] : v; };
+
+/** Everything that can be hidden, in the order the menu lists it. Parts a page doesn't have (the
+ *  Python-served dashboard has no guided or fitness panel) are left out. */
+function partGroups() {
+  return [["Tiles", TILE_DEFS.map(([k, l]) => ["tile_" + k, l])],
+          ["Charts", [["panel_curve", "Force curve"], ["panel_shape", "Curve shape"], ...TRENDS.map((t, i) => ["trend" + i, t[0].replace(/ \(.*/, "")])]],
+          ["Sections", [["setup", "Set up the PM5"], ["guided", "Guided session"], ["tablewrap", "Stroke table"], ["fitness", "Fitness panel"], ["sessions", "Saved rows"]]]]
+    .map(([g, items]) => [g, items.filter(([id]) => $(id))]).filter(([, items]) => items.length);
+}
+const allParts = () => partGroups().flatMap(([, items]) => items);
+
+function applyHidden() {
+  for (const [id] of allParts()) $(id).classList.toggle("hidden-part", hidden.has(id));
+  const m = document.querySelector("main");
+  if (m) m.style.gridTemplateColumns = hidden.has("panel_curve") || hidden.has("panel_shape") ? "1fr" : "";
+  const tr = $("trends"); if (tr) tr.classList.toggle("hidden-part", TRENDS.every((_, i) => hidden.has("trend" + i)));
+  document.querySelectorAll("#ui_parts input[type=checkbox]").forEach(cb => { cb.checked = !hidden.has(cb.dataset.part); });
+  document.querySelectorAll(".hidex").forEach(b => b.remove());
+  if (!$("ui_customise") || !$("ui_customise").checked) return;
+  for (const [id, label] of allParts()) {
+    if (hidden.has(id)) continue;
+    const el = $(id), b = document.createElement("button");
+    el.classList.add("hostx"); b.className = "hidex"; b.textContent = "✕"; b.title = `Hide ${label}`;
+    b.addEventListener("click", ev => { ev.stopPropagation(); ev.preventDefault(); hidden.add(id); applyUI(); });
+    el.appendChild(b);
+  }
+}
+
 function applyUI(save = true) {
   const cur = {};
   for (const [k, [prop, , show, cssv]] of Object.entries(UI)) {
-    const el = $("ui_" + k); const v = parseFloat(el.value); cur[k] = v;
-    document.documentElement.style.setProperty(prop, cssv(v)); $(`ui_${k}_v`).textContent = show(v);
+    const el = $("ui_" + k); if (!el) continue;
+    const v = parseFloat(el.value); cur[k] = v;
+    if (prop) document.documentElement.style.setProperty(prop, cssv(v));
+    $(`ui_${k}_v`).textContent = show(v);
   }
+  cur.hidden = [...hidden];
   if (save) { try { localStorage.setItem("pm5_display", JSON.stringify(cur)); } catch { /* private mode */ } }
+  applyHidden();
   render();
 }
 (function initUI() {
   const saved = loadUI();
-  for (const [k, [, dflt]] of Object.entries(UI)) { const el = $("ui_" + k); el.value = saved[k] ?? dflt; el.addEventListener("input", () => applyUI()); }
-  $("ui_reset").addEventListener("click", () => { for (const [k, [, dflt]] of Object.entries(UI)) $("ui_" + k).value = dflt; applyUI(); });
+  for (const [k, [, dflt]] of Object.entries(UI)) { const el = $("ui_" + k); if (!el) continue; el.value = saved[k] ?? dflt; el.addEventListener("input", () => applyUI()); }
+  for (const id of saved.hidden || []) hidden.add(id);
+  $("ui_parts").innerHTML = partGroups().map(([g, items]) =>
+    `<div class="pgroup"><b>${g}</b>${items.map(([id, l]) => `<label><input type="checkbox" data-part="${id}"> ${l}</label>`).join("")}</div>`).join("");
+  $("ui_parts").addEventListener("change", e => {
+    const cb = e.target.closest("input[data-part]"); if (!cb) return;
+    if (cb.checked) hidden.delete(cb.dataset.part); else hidden.add(cb.dataset.part);
+    applyUI();
+  });
+  $("ui_customise").addEventListener("change", () => applyUI());
+  $("ui_showall").addEventListener("click", () => { hidden.clear(); applyUI(); });
+  $("ui_reset").addEventListener("click", () => {
+    for (const [k, [, dflt]] of Object.entries(UI)) { const el = $("ui_" + k); if (el) el.value = dflt; }
+    hidden.clear(); applyUI();
+  });
   applyUI(false);
 })();
 $("src").addEventListener("change", render);
