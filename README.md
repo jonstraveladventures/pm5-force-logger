@@ -12,10 +12,19 @@ The Concept2 Logbook keeps the time, distance, pace, stroke rate and heart rate 
 
 ## What you get
 
-- A live dashboard at `http://localhost:8750`. It shows time, distance, pace, stroke rate, power, heart rate, peak force, drive length and time, drive-to-recovery ratio, distance and work per stroke, drag factor and calories. It also shows the force curve for your latest stroke, your last eight strokes, your session average and a reference shape, along with curve-shape measures against their targets, stroke-by-stroke trends and a table of recent strokes. The "Change the display" menu adjusts text size, the size of the curve, the tiles, the trend charts and the number of table rows, and switches off any part you don't want. Tick "customise" in that menu and the page itself becomes movable: drag any tile, chart or section to a new position, drag a corner to resize it, and press the ✕ on anything to hide it. Resizing a tile, a trend chart or the force-curve panel moves the matching slider, so the two never disagree. Everything you choose is remembered in the browser, and Reset puts it all back. The page can also set up the workout on the PM5 (see below).
-- Every stroke saved to disk: a raw log of every Bluetooth message and a session file with one record per stroke, including both force curves.
-- After each row, if you give it your mass and maximum heart rate, the watts you hold at a set heart rate and an estimate of VO2max (see below).
-- An optional upload to your Concept2 Logbook. ErgData cannot connect while this script holds the PM5's Bluetooth connection, so nothing else would send the row to the Logbook.
+**A live dashboard** at `http://localhost:8750`, with three things on it.
+
+| | |
+|---|---|
+| Numbers | Time, distance, pace, stroke rate, power, heart rate, peak force, drive length and time, drive-to-recovery ratio, distance and work per stroke, drag factor, calories. |
+| Force curve | Your latest stroke, your last eight, your session average and a reference shape, with the curve-shape measures against their targets. |
+| History | Stroke-by-stroke trends and a table of recent strokes. |
+
+**A dashboard you can rearrange.** The "Change the display" menu sets text size and the size of the curve, the tiles and the trend charts, and switches off any part you don't want. Tick "customise" in it and the page becomes movable: drag a tile, chart or section somewhere else, drag its corner to resize it, press the ✕ to hide it. Resizing a tile, a trend chart or the force-curve panel moves the matching slider, so the two never disagree. Your arrangement is remembered in the browser, and Reset puts it all back.
+
+**Every stroke saved to disk**, as a raw log of every Bluetooth message and a session file with one record per stroke, including both force curves.
+
+**Optional extras.** The page can set up the workout on the PM5, and run a guided session (see below). Given your mass and maximum heart rate, each row reports the watts you hold at a set heart rate and an estimate of VO2max. Each row can also go to your Concept2 Logbook, which matters because ErgData cannot connect while this script holds the PM5's Bluetooth connection, so nothing else would send it.
 
 ## Use it in the browser, nothing to install
 
