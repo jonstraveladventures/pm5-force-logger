@@ -87,6 +87,18 @@
   #sessions table { font-size: .82rem; }
   #sessions td:first-child { white-space: nowrap; }
   #sessions button { padding: 2px 6px; margin-left: 4px; }
+  .guided { margin: 8px 20px 4px; }
+  .guided .fields { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; font-size: .82rem; color: var(--ink2); }
+  .guided input[type=text] { width: auto; }
+  #g_live { margin-top: 10px; border-top: 1px solid var(--grid); padding-top: 10px; }
+  #g_block { font-size: .88rem; color: var(--ink2); }
+  #g_big { font-size: clamp(2rem, calc(4.5vw * var(--text)), 4rem); font-weight: 650; font-variant-numeric: tabular-nums; line-height: 1.1; margin: 4px 0; }
+  #g_left { font-size: 1.3rem; font-variant-numeric: tabular-nums; color: var(--ink); }
+  #g_bar { height: 6px; background: var(--grid); border-radius: 3px; margin: 8px 0; overflow: hidden; }
+  #g_barfill { height: 100%; width: 0; background: var(--s1); }
+  #g_check { display: flex; gap: 14px; flex-wrap: wrap; font-size: 1.1rem; font-variant-numeric: tabular-nums; }
+  #g_check .ok { color: var(--good); } #g_check .off { color: var(--warn); }
+  #g_next, #g_said { font-size: .82rem; color: var(--ink3); margin-top: 4px; }
   @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
 </style>
 </head>
@@ -125,6 +137,29 @@
   <button id="wo_send" class="primary" disabled>Send to PM5</button>
   <button id="wo_clear" title="End the programmed piece on the monitor" disabled>Clear</button>
   <span id="wo_status"></span>
+</section>
+
+<section class="panel guided" id="guided">
+  <div class="fields">
+    <h2 style="margin:0">Guided session</h2>
+    <select id="g_kind"></select>
+    <span id="g_params" class="fields"></span>
+    <label><input type="checkbox" id="g_ready"> start with the readiness check</label>
+    <label><input type="checkbox" id="g_voice" checked> voice</label>
+    <button id="g_start" class="primary">Start</button>
+    <button id="g_stop" hidden>Stop</button>
+    <button id="g_sim" hidden>Simulate a rower</button>
+  </div>
+  <div class="note" id="g_about"></div>
+  <div id="g_live" hidden>
+    <div id="g_block"></div>
+    <div style="display:flex; align-items:baseline; gap:18px; flex-wrap:wrap"><div id="g_big"></div><div id="g_left"></div></div>
+    <div id="g_bar"><div id="g_barfill"></div></div>
+    <div id="g_check"></div>
+    <div id="g_next"></div>
+    <div id="g_said"></div>
+  </div>
+  <pre id="g_out"></pre>
 </section>
 
 <section class="tiles" id="tiles"></section>

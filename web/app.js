@@ -5,10 +5,12 @@ import * as C from "./csafe.js";
 import * as V from "./vo2.js";
 import * as BLE from "./ble.js";
 import * as DB from "./store.js";
-import { H, render, S } from "./dashboard.js";
+import { H, render, S, metrics } from "./dashboard.js";
+import * as G from "./guided.js";
+import { GuidedUI } from "./guided-ui.js";
 
 const $ = id => document.getElementById(id);
-const state = { pm: null, session: null, raw: [], meta: {}, endTimer: null, sample: false, named: {} };
+const state = { pm: null, session: null, raw: [], meta: {}, endTimer: null, sample: false, named: {}, lastSaved: null };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 function stamp(d = new Date()) {
@@ -16,7 +18,7 @@ function stamp(d = new Date()) {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
 }
 function setConn(text, cls = "") { $("conn").textContent = text; $("conn").className = cls; }
-const emit = (kind, data) => { (H[kind] || (() => {}))(data); render(); };
+const emit = (kind, data) => { (H[kind] || (() => {}))(data); if (!state.sample) guided.onEvent(kind, data); render(); };
 
 // ---------- a session per piece ----------
 function startSession() {
@@ -54,11 +56,15 @@ async function finish(reason) {
   state.session = null;
   if (!s || !s.strokes.size || state.sample) return;
   const data = s.result(state.meta);
+  // when peak position started drifting later, if it did: saved with every row
+  data.fatigue = G.fatigueOnset(data.strokes.map(st => { const c = st.force_curve_v2 || st.force_curve, m = c ? metrics(c) : null; return { t: st.elapsed_s, a100: m ? m.a100 : null }; }));
   const head = { t: state.raw.length ? state.raw[0].t : Math.round(Date.now() / 1000), device: state.meta.device || null, workout: state.meta.workout || null };
   try {
     await DB.putSession(data);
     await DB.putRaw(state.meta.started, [head, ...state.raw]);
+    state.lastSaved = state.meta.started;
     H.ended({ session: state.meta.started });
+    if (data.fatigue && data.fatigue.onset_s != null) $("banner").textContent += ` · peak position drifted later from ${G.fmtClock(data.fatigue.onset_s)}`;
     setConn(`${reason}; saved ${data.strokes.length} strokes as ${state.meta.started}`, state.pm && state.pm.connected ? "live" : "");
   } catch (e) {
     setConn(`${reason}; saving failed (${e.message}). Download it now from the table below before leaving the page.`, "err");
@@ -215,6 +221,14 @@ $("sessions_list").addEventListener("click", async e => {
     if (confirm(`Delete the row ${id} from this browser? Download it first if you want to keep it.`)) { await DB.deleteSession(id); refreshSessions(); }
   }
 });
+
+// ---------- guided sessions ----------
+const guided = new GuidedUI({ $, H, S, render, metrics, DB, isConnected: () => !!(state.pm && state.pm.connected),
+  onResult: async result => {   // the report goes into the row's session file
+    if (state.session && state.session.strokes.size) { state.meta.guided = result; return; }
+    if (!state.lastSaved) return;
+    try { const s = await DB.getSession(state.lastSaved); if (s) { s.guided = result; await DB.putSession(s); } } catch { /* the report is still on the page */ }
+  } });
 
 // ---------- wiring ----------
 $("connect").addEventListener("click", connect);
