@@ -27,7 +27,7 @@ export class GuidedUI {
     sel.value = saved.kind && G.PROTOCOLS[saved.kind] ? saved.kind : "rate";
     $("g_ready").checked = !!saved.readiness; $("g_voice").checked = saved.voice !== false;
     sel.addEventListener("change", () => { this.fields(); this.save(); });
-    for (const id of ["g_ready", "g_voice"]) $(id).addEventListener("change", () => this.save());
+    for (const id of ["g_ready", "g_voice"]) $(id).addEventListener("change", () => { this.save(); this.showPlan(); });
     $("g_start").addEventListener("click", () => this.start(false));
     $("g_stop").addEventListener("click", () => this.finish(true));
     if (this.simSpeed) { $("g_sim").hidden = false; $("g_sim").textContent = `Simulate a rower (${this.simSpeed}×)`; $("g_sim").addEventListener("click", () => this.start(true)); }
@@ -46,8 +46,37 @@ export class GuidedUI {
       }
       return `<label>${label} <input type="text" data-f="${name}" value="${v}" size="${type === "list" ? 8 : 5}"></label>`;
     }).join("");
-    $("g_params").querySelectorAll("[data-f]").forEach(el => el.addEventListener("change", () => this.save()));
-    $("g_about").textContent = def.about + (kind === "readiness" ? "" : " Row a Just Row piece on the monitor.");
+    $("g_params").querySelectorAll("[data-f]").forEach(el => el.addEventListener("change", () => { this.save(); this.showPlan(); }));
+    $("g_about").textContent = def.about + (kind === "readiness" ? "" : " Set the monitor for the length you want, or type it in, and the blocks fit themselves to it.");
+    this.showPlan();
+  }
+
+  /** The session as it would run now: the settings, fitted to the piece the monitor is set for. */
+  plan() {
+    const $ = this.$, kind = $("g_kind").value, def = G.PROTOCOLS[kind], params = this.params();
+    const fit = def.fields.some(([name]) => name === "total") ? G.pieceSeconds(this.S.status, params) : null;
+    if (fit) params.total = fit.s / 60;
+    try {
+      let protocol = def.build(params);
+      if ($("g_ready").checked && kind !== "readiness") {
+        const rp = ((store.get("pm5_guided", {}).params || {}).readiness || {});
+        protocol = G.withReadiness(protocol, { watts: G.parseField(rp.watts ?? 120, "num") || 120 });
+      }
+      new G.Engine(protocol);
+      return { protocol, fit };
+    } catch (e) { return { error: e.message, fit }; }
+  }
+
+  showPlan() {
+    const $ = this.$, el = $("g_plan"); if (!el || this.engine) return;
+    const { protocol, fit, error } = this.plan();
+    if (fit) { const box = $("g_params").querySelector('[data-f="total"]'); if (box && parseFloat(box.value) !== fit.s / 60) box.value = Math.round(fit.s / 6) / 10; }
+    // `|| []`: for a few minutes after an update the browser can pair this file with a cached older
+    // guided.js whose sessions carry no warnings, and the page must still start
+    const warnings = (protocol && protocol.warnings) || [];
+    el.className = "note" + (error ? " err" : warnings.length ? " warn" : "");
+    el.textContent = error ? error : [(G.describePlan ? G.describePlan(protocol) : "") + (fit ? ` (${fit.note})` : ""), ...warnings].join(" ").trim();
+    this.lastPiece = `${(this.S.status || {}).piece_type}:${(this.S.status || {}).piece_length}`;
   }
 
   params() {
@@ -66,22 +95,16 @@ export class GuidedUI {
   }
 
   // ---------------------------------------------------------------- running
+  planForSim() { const saved = this.S.status; this.S.status = {}; const r = this.plan(); this.S.status = saved; return r; }   // the simulator has no piece on a monitor
+
   now() { return this.sim ? this.simStart + (Date.now() / 1000 - this.realStart) * this.simSpeed : Date.now() / 1000; }
 
   start(simulate) {
     const $ = this.$;
     if (this.engine) return;
     if (!simulate && !this.isConnected()) { this.say("Connect to the PM5 first.", true); $("g_out").textContent = "Connect to the PM5 first, then start the session."; return; }
-    const kind = $("g_kind").value;
-    let protocol;
-    try {
-      protocol = G.PROTOCOLS[kind].build(this.params());
-      if ($("g_ready").checked && kind !== "readiness") {
-        const rp = ((store.get("pm5_guided", {}).params || {}).readiness || {});
-        protocol = G.withReadiness(protocol, { watts: G.parseField(rp.watts ?? 120, "num") || 120 });
-      }
-      new G.Engine(protocol);                                 // throws on a malformed protocol before anything starts
-    } catch (e) { $("g_out").textContent = `Can't build that session: ${e.message}`; return; }
+    const { protocol, error } = simulate ? this.planForSim() : this.plan();
+    if (error) { $("g_out").textContent = `Can't start that session: ${error}`; this.showPlan(); return; }
     this.save();
     this.engine = new G.Engine(protocol); this.pendingN = null; this.norms = []; this.cues = [];
     this.onRunning(true);
@@ -113,6 +136,7 @@ export class GuidedUI {
 
   /** Stroke events from the live session (not the simulator, which calls addStroke itself). */
   onEvent(kind, data) {
+    if (kind === "status" && !this.engine && `${data.piece_type}:${data.piece_length}` !== this.lastPiece) this.showPlan();
     if (!this.engine || this.sim || kind !== "stroke") return;
     // a stroke's curve and recovery time arrive after its record, so score the previous stroke now
     if (this.pendingN != null && this.S.strokes.get(this.pendingN)) this.addStroke(this.S.strokes.get(this.pendingN));
@@ -163,6 +187,7 @@ export class GuidedUI {
     const $ = this.$;
     this.engine = null; this.onRunning(false); this.sim = null; this.recent = []; this.last = null;
     $("g_start").disabled = false; $("g_sim").disabled = false; $("g_stop").hidden = true; $("g_live").hidden = true;
+    this.showPlan();
   }
 
   // ---------------------------------------------------------------- output

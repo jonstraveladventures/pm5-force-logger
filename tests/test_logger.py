@@ -48,6 +48,15 @@ class ParseTests(unittest.TestCase):
         p = L.parse(0x0031, b)
         self.assertEqual((p["elapsed_s"], p["distance_m"], p["workout_type"], p["workout_state"], p["drag_factor"]),
                          (27.0, 123.4, 1, "workout_row", 116))
+        self.assertEqual((p["piece_type"], p["piece_length"]), ("distance", 0))
+
+    def test_general_status_reports_the_programmed_piece(self):
+        # a 30:00 piece, as 2026-09-18's row reported it: 180000 in 0.01 s, type 0 (time)
+        b = le(2700, 3) + le(1234, 3) + bytes([5, 0, 1, 1, 2]) + le(0, 3) + le(180000, 3) + bytes([0x00, 113])
+        p = L.parse(0x0031, b)
+        self.assertEqual((p["piece_type"], p["piece_length"], p["drag_factor"]), ("time", 1800.0, 113))
+        b = le(0, 3) + le(0, 3) + bytes([3, 0, 0, 1, 1]) + le(0, 3) + le(5000, 3) + bytes([0x80, 116])
+        self.assertEqual((L.parse(0x0031, b)["piece_type"], L.parse(0x0031, b)["piece_length"]), ("distance", 5000))
 
     def test_additional_status_reads_hr_pace_and_rate(self):
         b = le(1000, 3) + le(3850, 2) + bytes([24, 150]) + le(12990, 2) + le(13120, 2) + le(0, 2) + le(0, 3) + bytes([0])

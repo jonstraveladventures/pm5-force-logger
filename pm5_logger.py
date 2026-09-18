@@ -67,6 +67,9 @@ WORKOUT_STATE = {0: "wait_to_begin", 1: "workout_row", 2: "countdown_pause", 3: 
                  10: "workout_end", 11: "terminate", 12: "workout_logged", 13: "rearm"}
 
 
+DURATION_TYPE = {0x00: "time", 0x40: "calories", 0x80: "distance", 0xC0: "watt_minutes"}
+
+
 def u16(b, i):
     return b[i] | b[i + 1] << 8
 
@@ -79,9 +82,12 @@ def parse(short: int, b: bytes) -> dict | None:
     """Decode the characteristics we understand; anything else stays raw only."""
     try:
         if short == 0x0031 and len(b) >= 19:
+            # bytes 14-16 are the programmed piece's length, in the unit byte 17 names (time in
+            # 0.01 s, calories, metres); a Just Row reports 0
             return {"elapsed_s": u24(b, 0) / 100, "distance_m": u24(b, 3) / 10, "workout_type": b[6],
                     "workout_state": WORKOUT_STATE.get(b[8], b[8]), "rowing_state": b[9],
-                    "stroke_state": b[10], "drag_factor": b[18]}
+                    "stroke_state": b[10], "drag_factor": b[18],
+                    "piece_type": DURATION_TYPE.get(b[17], b[17]), "piece_length": u24(b, 14) / (100 if b[17] == 0 else 1)}
         if short == 0x0032 and len(b) >= 16:
             return {"elapsed_s": u24(b, 0) / 100, "speed_ms": u16(b, 3) / 1000,
                     "stroke_rate": b[5], "hr": None if b[6] in (0, 255) else b[6],
@@ -185,7 +191,7 @@ class Session:
         elif short == 0x0031:
             self.status.update(drag_factor=p["drag_factor"], workout_state=p["workout_state"],
                                workout_type=p["workout_type"], elapsed_s=p["elapsed_s"],
-                               distance_m=p["distance_m"])
+                               distance_m=p["distance_m"], piece_type=p["piece_type"], piece_length=p["piece_length"])
         elif short == 0x0033:
             self.status.update(avg_power_w=p["avg_power_w"], calories_total=p["calories_total"])
         elif short == 0x003A:

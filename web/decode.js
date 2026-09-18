@@ -18,6 +18,7 @@ export const WORKOUT_STATE = {
   12: "workout_logged", 13: "rearm",
 };
 
+const DURATION_TYPE = { 0x00: "time", 0x40: "calories", 0x80: "distance", 0xc0: "watt_minutes" };
 const u16 = (b, i) => b[i] | (b[i + 1] << 8);
 const u24 = (b, i) => b[i] | (b[i + 1] << 8) | (b[i + 2] << 16);
 const round3 = t => Math.round(t * 1000) / 1000;
@@ -32,8 +33,11 @@ export const bytesToHex = b => Array.from(b, x => x.toString(16).padStart(2, "0"
 /** Decode the characteristics we understand; anything else stays raw only. */
 export function parse(short, b) {
   if (short === 0x0031 && b.length >= 19) {
+    // bytes 14-16 are the programmed piece's length, in the unit byte 17 names (time in 0.01 s,
+    // calories, metres); a Just Row reports 0
     return { elapsed_s: u24(b, 0) / 100, distance_m: u24(b, 3) / 10, workout_type: b[6],
-      workout_state: WORKOUT_STATE[b[8]] ?? b[8], rowing_state: b[9], stroke_state: b[10], drag_factor: b[18] };
+      workout_state: WORKOUT_STATE[b[8]] ?? b[8], rowing_state: b[9], stroke_state: b[10], drag_factor: b[18],
+      piece_type: DURATION_TYPE[b[17]] ?? b[17], piece_length: u24(b, 14) / (b[17] === 0 ? 100 : 1) };
   }
   if (short === 0x0032 && b.length >= 16) {
     return { elapsed_s: u24(b, 0) / 100, speed_ms: u16(b, 3) / 1000, stroke_rate: b[5],
@@ -115,7 +119,8 @@ export class Session {
     } else if (short === 0x0032) {
       Object.assign(this.status, { hr: p.hr, stroke_rate: p.stroke_rate, pace_s: p.pace_s, avg_pace_s: p.avg_pace_s, elapsed_s: p.elapsed_s });
     } else if (short === 0x0031) {
-      Object.assign(this.status, { drag_factor: p.drag_factor, workout_state: p.workout_state, workout_type: p.workout_type, elapsed_s: p.elapsed_s, distance_m: p.distance_m });
+      Object.assign(this.status, { drag_factor: p.drag_factor, workout_state: p.workout_state, workout_type: p.workout_type, elapsed_s: p.elapsed_s, distance_m: p.distance_m,
+        piece_type: p.piece_type, piece_length: p.piece_length });
     } else if (short === 0x0033) {
       Object.assign(this.status, { avg_power_w: p.avg_power_w, calories_total: p.calories_total });
     } else if (short === 0x003a) {

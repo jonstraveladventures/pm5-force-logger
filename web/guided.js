@@ -25,8 +25,10 @@ export const DEFAULT_REST = 60;       // resting heart rate when the fitness set
 
 function minutesWords(s) {
   if (s === 60) return "one minute";
-  const m = Math.floor(s / 60), half = s % 60 === 30;
-  return half ? `${m} and a half minutes` : s % 60 ? `${Math.round(s)} seconds` : `${m} minutes`;
+  const m = Math.floor(s / 60), sec = Math.round(s % 60);
+  if (!sec) return `${m} minutes`;
+  if (sec === 30 && m) return `${m} and a half minutes`;
+  return m ? `${m} minute${m > 1 ? "s" : ""} ${sec} seconds` : `${sec} seconds`;
 }
 function targetWords(t) {
   const parts = [];
@@ -41,16 +43,40 @@ const recovery = () => ({ label: "Recovery heart rate", short: "recovery heart r
 const warmup = (s, t = {}) => ({ label: "Warm-up", short: "warm-up", role: "warmup", s, ...t,
   cue: `Warm up for ${minutesWords(s)}${targetWords(t) ? ", " + targetWords(t) : ", easy"}.` });
 
-export function readinessBlock({ watts = 120, s = 300, count_s = 120 } = {}) {
-  return { label: `Readiness check, ${watts} W`, short: "readiness check", role: "readiness", s, count_s, watts,
+export function readinessBlock({ watts = 120, s = 300, count_s = null } = {}) {
+  const c = count_s ?? Math.max(60, Math.min(120, s - 90));
+  return { label: `Readiness check, ${watts} W`, short: "readiness check", role: "readiness", s, count_s: c, watts,
     cue: `Readiness check: ${watts} watts for ${minutesWords(s)}, any rate.` };
 }
 
+// ---------------------------------------------------------------------------- fitting to a length
+//
+// Each session takes the total rowing time you want (the recovery minute comes after it) and
+// shares it out: the warm-up first, the rest divided among the blocks. Heart rate needs about 90
+// seconds to settle after a change and the analysis counts the last part of each block, so a
+// block has a length below which the numbers get unreliable (a warning) and one below which there
+// is nothing left to count (an error).
+const SETTLE_S = 90;
+const round5 = x => Math.max(5, Math.round(x / 5) * 5);
+export class TooShort extends Error {}
+function share(total_s, warm_s, n, { warnBelow, failBelow, what }) {
+  const block = Math.floor((total_s - warm_s) / n / 5) * 5;
+  const warnings = [];
+  const needed = m => Math.ceil((warm_s + n * m) / 60);
+  if (block < failBelow) throw new TooShort(`${fmtClock(total_s)} is too short: after the ${fmtClock(warm_s)} warm-up, each of the ${n} ${what} would get ${fmtClock(Math.max(0, block))}. Allow at least ${needed(warnBelow)} minutes.`);
+  if (block < warnBelow) warnings.push(`Each ${what.replace(/s$/, "")} gets only ${fmtClock(block)}; heart rate needs about ${SETTLE_S} seconds to settle after a change, so the numbers will be less reliable. About ${needed(warnBelow)} minutes would be enough.`);
+  return { block, warnings, spare: total_s - warm_s - block * n };
+}
+const minutes = s => (s % 60 ? `${Math.round(s / 6) / 10}` : `${s / 60}`);
+
 /** Heart rate at a fixed pace across stroke rates, rows in a palindrome (14, 17, 20, 20, 17, 14)
  *  so that steady drift lands equally on every rate and cancels in each rate's average. */
-export function rateTest({ rates = [14, 17, 20], pace_s = 132, block_s = 210, count_s = 120, warm_s = 300, warm_rate = 16 } = {}) {
+export function rateTest({ rates = [14, 17, 20], pace_s = 132, total_s = 1800, warm_s = 480, block_s = null, count_s = null, warm_rate = 16 } = {}) {
   const order = [...rates, ...[...rates].reverse()];
-  return { kind: "rate", title: `Best stroke rate at ${fmtPace(pace_s)}`, params: { rates, pace_s, block_s, count_s },
+  let warnings = [];
+  if (block_s == null) { const f = share(total_s, warm_s, order.length, { warnBelow: 180, failBelow: 150, what: "blocks" }); block_s = f.block; warnings = f.warnings; warm_s += f.spare; }
+  count_s = count_s ?? Math.max(60, Math.min(120, block_s - SETTLE_S));
+  return { kind: "rate", title: `Best stroke rate at ${fmtPace(pace_s)}`, params: { rates, pace_s, block_s, count_s, total_s: warm_s + block_s * order.length, warm_s }, warnings,
     blocks: [warmup(warm_s, { rate: warm_rate, pace_s }),
       ...order.map(r => ({ label: `${r} strokes a minute`, short: `${r} strokes a minute`, role: "test", key: r, rate: r, pace_s, s: block_s, count_s,
         cue: `${r} strokes a minute, pace ${fmtPace(pace_s)}, for ${minutesWords(block_s)}.` })),
@@ -58,9 +84,12 @@ export function rateTest({ rates = [14, 17, 20], pace_s = 132, block_s = 210, co
 }
 
 /** The same design across damper settings at a fixed pace; the PM5 measures the drag factor. */
-export function dragSweep({ dampers = [3, 5, 7], pace_s = 132, block_s = 210, count_s = 120, warm_s = 300 } = {}) {
+export function dragSweep({ dampers = [3, 5, 7], pace_s = 132, total_s = 1800, warm_s = 480, block_s = null, count_s = null } = {}) {
   const order = [...dampers, ...[...dampers].reverse()];
-  return { kind: "drag", title: `Drag sweep at ${fmtPace(pace_s)}`, params: { dampers, pace_s, block_s, count_s },
+  let warnings = [];
+  if (block_s == null) { const f = share(total_s, warm_s, order.length, { warnBelow: 180, failBelow: 150, what: "blocks" }); block_s = f.block; warnings = f.warnings; warm_s += f.spare; }
+  count_s = count_s ?? Math.max(60, Math.min(120, block_s - SETTLE_S));
+  return { kind: "drag", title: `Drag sweep at ${fmtPace(pace_s)}`, params: { dampers, pace_s, block_s, count_s, total_s: warm_s + block_s * order.length, warm_s }, warnings,
     blocks: [warmup(warm_s, { pace_s }),
       ...order.map(d => ({ label: `damper ${d}`, short: `damper ${d}`, role: "test", key: d, damper: d, pace_s, s: block_s, count_s,
         cue: `Set the damper to ${d}, then pace ${fmtPace(pace_s)} for ${minutesWords(block_s)}.` })),
@@ -69,9 +98,9 @@ export function dragSweep({ dampers = [3, 5, 7], pace_s = 132, block_s = 210, co
 
 /** A row steered to keep heart rate under a ceiling: the pace target rises while there is
  *  headroom and eases as heart rate reaches the ceiling. */
-export function hrCap({ ceiling = 148, minutes = 25, start_pace_s = 135, warm_s = 300 } = {}) {
-  const s = Math.max(60, minutes * 60 - warm_s);
-  return { kind: "hrcap", title: `Capped at ${ceiling} bpm`, params: { ceiling, minutes, start_pace_s },
+export function hrCap({ ceiling = 148, total_s = 1500, start_pace_s = 135, warm_s = 300 } = {}) {
+  const { block: s, warnings } = share(total_s, warm_s, 1, { warnBelow: 600, failBelow: 300, what: "capped rows" });
+  return { kind: "hrcap", title: `Capped at ${ceiling} bpm`, params: { ceiling, total_s, start_pace_s }, warnings,
     blocks: [warmup(warm_s, { pace_s: start_pace_s }),
       { label: `Capped row, ceiling ${ceiling}`, short: "the capped row", role: "test", key: "cap", control: "hrcap", ceiling, pace_s: start_pace_s, s,
         cue: `Now I'll steer the pace to keep your heart rate under ${ceiling}. Start at ${fmtPace(start_pace_s)}.` },
@@ -79,9 +108,9 @@ export function hrCap({ ceiling = 148, minutes = 25, start_pace_s = 135, warm_s 
 }
 
 /** Fixed power for a long row; heart rate per watt in the two halves gives the aerobic decoupling. */
-export function driftTest({ watts = 140, minutes = 35, warm_s = 300 } = {}) {
-  const s = Math.max(120, minutes * 60 - warm_s);
-  return { kind: "drift", title: `Drift test at ${watts} W`, params: { watts, minutes },
+export function driftTest({ watts = 140, total_s = 2100, warm_s = 300 } = {}) {
+  const { block: s, warnings } = share(total_s, warm_s, 1, { warnBelow: 1200, failBelow: 600, what: "holds" });
+  return { kind: "drift", title: `Drift test at ${watts} W`, params: { watts, total_s }, warnings,
     blocks: [warmup(warm_s, { watts }),
       { label: `Hold ${watts} W`, short: `${watts} watts`, role: "test", key: "hold", watts, s,
         cue: `Hold ${watts} watts, pace ${fmtPace(paceFromWatts(watts))}, for ${minutesWords(s)}.` },
@@ -89,7 +118,10 @@ export function driftTest({ watts = 140, minutes = 35, warm_s = 300 } = {}) {
 }
 
 /** Stages of rising power; heart rate at the end of each gives the heart-rate-against-power line. */
-export function stepTest({ start_w = 110, step_w = 20, stages = 4, stage_s = 240, count_s = 90, warm_s = 300 } = {}) {
+export function stepTest({ start_w = 110, step_w = 20, stages = 4, total_s = 1260, warm_s = 300, stage_s = null, count_s = 90 } = {}) {
+  let warnings = [];
+  if (stage_s == null) { const f = share(total_s, warm_s, stages, { warnBelow: 180, failBelow: 120, what: "stages" }); stage_s = f.block; warnings = f.warnings; warm_s += f.spare; }
+  count_s = Math.min(count_s, stage_s - 30);
   const blocks = [warmup(warm_s, { watts: start_w })];
   for (let i = 0; i < stages; i++) {
     const w = start_w + i * step_w;
@@ -97,11 +129,11 @@ export function stepTest({ start_w = 110, step_w = 20, stages = 4, stage_s = 240
       cue: `Stage ${i + 1}: ${w} watts, pace ${fmtPace(paceFromWatts(w))}, for ${minutesWords(stage_s)}.` });
   }
   blocks.push(recovery());
-  return { kind: "step", title: `Step test from ${start_w} W`, params: { start_w, step_w, stages, stage_s, count_s }, blocks };
+  return { kind: "step", title: `Step test from ${start_w} W`, params: { start_w, step_w, stages, stage_s, count_s, total_s: warm_s + stages * stage_s }, warnings, blocks };
 }
 
 export function readinessCheck({ watts = 120 } = {}) {
-  return { kind: "readiness", title: `Readiness check at ${watts} W`, params: { watts }, blocks: [readinessBlock({ watts }), recovery()] };
+  return { kind: "readiness", title: `Readiness check at ${watts} W`, params: { watts, total_s: 300 }, warnings: [], blocks: [readinessBlock({ watts }), recovery()] };
 }
 
 export const DRILLS = {
@@ -120,20 +152,27 @@ export function drillHit(sample, drill) {
 }
 
 /** Drill blocks with easy rowing between; the easy blocks score the same target as a baseline. */
-export function drillSession({ drill = "peak", target = null, repeats = 3, drill_s = 180, easy_s = 120, warm_s = 300 } = {}) {
+export function drillSession({ drill = "peak", target = null, repeats = 3, total_s = 1200, warm_s = 300, drill_s = null, easy_s = null } = {}) {
   const d = { kind: drill, target: target ?? DRILLS[drill].default };
+  let warnings = [];
+  if (drill_s == null) {
+    const f = share(total_s, warm_s, repeats, { warnBelow: 200, failBelow: 100, what: "drill-and-easy pairs" });
+    drill_s = round5(f.block * 0.6); easy_s = f.block - drill_s; warnings = f.warnings; warm_s += f.spare;
+  }
   const blocks = [warmup(warm_s)];
   for (let i = 0; i < repeats; i++) {
     blocks.push({ label: `Drill ${i + 1}: ${DRILLS[drill].label}`, short: `drill ${i + 1}`, role: "drill", key: "drill", drill: d, s: drill_s, cue: DRILLS[drill].cue(d.target) });
     blocks.push({ label: "Easy rowing", short: "easy rowing", role: "easy", key: "easy", drill: d, s: easy_s, cue: "Easy rowing. Relax." });
   }
-  return { kind: "drill", title: `Drill: ${DRILLS[drill].text(d.target)}`, params: { drill, target: d.target, repeats }, blocks };
+  return { kind: "drill", title: `Drill: ${DRILLS[drill].text(d.target)}`, params: { drill, target: d.target, repeats, total_s: warm_s + repeats * (drill_s + easy_s) }, warnings, blocks };
 }
 
 /** Put the readiness check in place of a protocol's warm-up. */
 export function withReadiness(protocol, opts = {}) {
-  const blocks = [...protocol.blocks], rb = readinessBlock(opts);
-  if (blocks[0] && blocks[0].role === "warmup") blocks[0] = rb; else blocks.unshift(rb);
+  const blocks = [...protocol.blocks];
+  const warm = blocks[0] && blocks[0].role === "warmup" ? blocks[0] : null;
+  const rb = readinessBlock({ ...opts, s: warm ? warm.s : opts.s ?? 300 });      // takes the warm-up's place and its length
+  if (warm) blocks[0] = rb; else blocks.unshift(rb);
   return { ...protocol, blocks, params: { ...protocol.params, readiness_w: rb.watts } };
 }
 
@@ -409,29 +448,57 @@ export function report(r) {
   return L.join("\n");
 }
 
+/** The rowing time a session should fill, from the piece the monitor is set for (whether it was
+ *  set on the PM5 or from this page). A timed piece gives it directly; a distance piece gives it
+ *  when the session holds a fixed pace. Returns null when there is nothing to fit to. */
+export function pieceSeconds(status, params = {}) {
+  if (!status || !status.piece_length) return null;
+  if (status.piece_type === "time") return { s: Math.round(status.piece_length), note: `fitted to the ${fmtClock(status.piece_length)} piece on the monitor` };
+  if (status.piece_type === "distance") {
+    const pace = params.pace ?? (params.watts ? paceFromWatts(params.watts) : null);
+    if (pace) { const s = Math.round(status.piece_length / 500 * pace); return { s, note: `fitted to the ${status.piece_length} m piece on the monitor, which takes about ${fmtClock(s)} at ${fmtPace(pace)}` }; }
+  }
+  return null;
+}
+
+/** "30:00 of rowing: 8:00 warm-up, then 6 blocks of 3:40, then a minute sitting still." */
+export function describePlan(protocol) {
+  const rowing = protocol.blocks.filter(b => b.role !== "recovery"), first = rowing[0], rest = rowing.slice(1);
+  const total = rowing.reduce((a, b) => a + b.s, 0);
+  const lens = [...new Set(rest.map(b => b.s))];
+  let middle;
+  if (!rest.length) middle = "";
+  else if (lens.length === 1) middle = rest.length === 1 ? `, then ${fmtClock(rest[0].s)} of ${rest[0].short || "rowing"}` : `, then ${rest.length} blocks of ${fmtClock(lens[0])}`;
+  else if (lens.length === 2 && rest.length % 2 === 0) middle = `, then ${rest.length / 2} × (${fmtClock(rest[0].s)} ${rest[0].role} + ${fmtClock(rest[1].s)} ${rest[1].role})`;
+  else middle = `, then ${rest.map(b => fmtClock(b.s)).join(" + ")}`;
+  const warm = first.role === "readiness" ? "readiness check" : first.role === "warmup" ? "warm-up" : first.short || first.label;
+  const tail = protocol.blocks.some(b => b.role === "recovery") ? ", then a minute sitting still" : "";
+  return `${fmtClock(total)} of rowing: ${fmtClock(first.s)} ${warm}${middle}${tail}.`;
+}
+
 // ---------------------------------------------------------------------------- the menu
 
 export const PROTOCOLS = {
-  rate: { title: "Best stroke rate at a fixed pace", build: p => rateTest({ rates: p.rates, pace_s: p.pace, block_s: p.block * 60 }),
-    fields: [["rates", "rates", "14,17,20", "list"], ["pace", "pace", "2:12", "pace"], ["block", "block (min)", 3.5, "num"]],
+  rate: { title: "Best stroke rate at a fixed pace", build: p => rateTest({ rates: p.rates, pace_s: p.pace, total_s: p.total * 60, warm_s: p.warm * 60 }),
+    fields: [["rates", "rates", "14,17,20", "list"], ["pace", "pace", "2:12", "pace"], ["total", "total (min)", 30, "num"], ["warm", "warm-up (min)", 8, "num"]],
     about: "Rows each rate twice, in a palindrome, at one pace. Heart rate at the end of each block, adjusted to the target power, finds the rate that costs you least." },
-  hrcap: { title: "Heart-rate-capped row", build: p => hrCap({ ceiling: p.ceiling, minutes: p.minutes, start_pace_s: p.pace }),
-    fields: [["ceiling", "ceiling (bpm)", 148, "num"], ["minutes", "minutes", 25, "num"], ["pace", "starting pace", "2:15", "pace"]],
+  hrcap: { title: "Heart-rate-capped row", build: p => hrCap({ ceiling: p.ceiling, total_s: p.total * 60, start_pace_s: p.pace }),
+    fields: [["ceiling", "ceiling (bpm)", 148, "num"], ["total", "total (min)", 25, "num"], ["pace", "starting pace", "2:15", "pace"]],
     about: "Steers the pace to keep heart rate under the ceiling, and reports the watts you held there. Rowed weekly, the number should rise." },
-  drift: { title: "Drift test", build: p => driftTest({ watts: p.watts, minutes: p.minutes }),
-    fields: [["watts", "watts", 140, "num"], ["minutes", "minutes", 35, "num"]],
+  drift: { title: "Drift test", build: p => driftTest({ watts: p.watts, total_s: p.total * 60 }),
+    fields: [["watts", "watts", 140, "num"], ["total", "total (min)", 35, "num"]],
     about: "Fixed power for a long row. Heart rate per watt in the second half against the first gives the aerobic decoupling." },
-  step: { title: "Step test", build: p => stepTest({ start_w: p.start, step_w: p.step, stages: p.stages, stage_s: p.stage * 60 }),
-    fields: [["start", "first stage (W)", 110, "num"], ["step", "step (W)", 20, "num"], ["stages", "stages", 4, "num"], ["stage", "stage (min)", 4, "num"]],
+  step: { title: "Step test", build: p => stepTest({ start_w: p.start, step_w: p.step, stages: p.stages, total_s: p.total * 60 }),
+    fields: [["start", "first stage (W)", 110, "num"], ["step", "step (W)", 20, "num"], ["stages", "stages", 4, "num"], ["total", "total (min)", 21, "num"]],
     about: "Stages of rising power, all below zone 3. Heart rate at the end of each gives the heart-rate-against-power line and, with your fitness settings, a VO2max estimate." },
-  drag: { title: "Drag sweep", build: p => dragSweep({ dampers: p.dampers, pace_s: p.pace, block_s: p.block * 60 }),
-    fields: [["dampers", "damper settings", "3,5,7", "list"], ["pace", "pace", "2:12", "pace"], ["block", "block (min)", 3.5, "num"]],
+  drag: { title: "Drag sweep", build: p => dragSweep({ dampers: p.dampers, pace_s: p.pace, total_s: p.total * 60, warm_s: p.warm * 60 }),
+    fields: [["dampers", "damper settings", "3,5,7", "list"], ["pace", "pace", "2:12", "pace"], ["total", "total (min)", 30, "num"], ["warm", "warm-up (min)", 8, "num"]],
     about: "The same palindrome across damper settings. You move the damper when told; the monitor measures the drag factor." },
   readiness: { title: "Readiness check", build: p => readinessCheck({ watts: p.watts }),
     fields: [["watts", "watts", 120, "num"]],
     about: "Five easy minutes at a fixed power. Heart rate well above your usual can mean fatigue or illness. Tick the box to use it as any session's warm-up." },
-  drill: { title: "Technique drill", build: p => drillSession({ drill: p.drill, target: p.target === "" || p.target == null ? null : p.target, repeats: p.repeats }),
-    fields: [["drill", "drill", "peak", "choice:peak=peak position,ratio=drive : recovery,consistency=consistency"], ["target", "target (blank for default)", "", "num"], ["repeats", "repeats", 3, "num"]],
+  drill: { title: "Technique drill", build: p => drillSession({ drill: p.drill, target: p.target === "" || p.target == null ? null : p.target, repeats: p.repeats, total_s: p.total * 60 }),
+    fields: [["drill", "drill", "peak", "choice:peak=peak position,ratio=drive : recovery,consistency=consistency"], ["target", "target (blank for default)", "", "num"], ["repeats", "repeats", 3, "num"], ["total", "total (min)", 20, "num"]],
     about: "Three-minute drill blocks with easy rowing between. Every ten drill strokes you hear how many hit the target." },
 };
 

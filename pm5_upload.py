@@ -51,7 +51,83 @@ def pace_from_power(watts):
     return 500 * (2.80 / watts) ** (1 / 3) if watts else None
 
 
+REST_TAIL_S = 10        # a stop at the end longer than this is rest, not rowing
+
+
+def trim_rest(sess: dict) -> tuple[dict, float]:
+    """A Just Row keeps its clock running while you sit still at the end (every guided session
+    ends with a recovery minute, and nudging the handle adds a few metres), which drags the
+    average pace down. Cut the piece at the last real stroke, the last one with at least 40% of
+    the median power, when more than REST_TAIL_S seconds follow it. Returns (session, seconds
+    removed). Fixed-distance and fixed-time pieces end on the monitor and are left alone."""
+    s, strokes = sess.get("summary") or {}, sess.get("strokes") or []
+    if s.get("workout_type") not in (0, 1) or len(strokes) < 10 or not s.get("elapsed_s"):
+        return sess, 0.0
+    watts = sorted(st["power_w"] for st in strokes if st.get("power_w"))
+    if not watts:
+        return sess, 0.0
+    floor = 0.4 * watts[len(watts) // 2]
+    real = [i for i, st in enumerate(strokes) if (st.get("power_w") or 0) >= floor]
+    if not real:
+        return sess, 0.0
+    last = strokes[real[-1]]
+    cut = s["elapsed_s"] - last["elapsed_s"]
+    if cut <= REST_TAIL_S:
+        return sess, 0.0
+    kept = strokes[:real[-1] + 1]
+    summary = {**s, "elapsed_s": last["elapsed_s"], "distance_m": last["distance_m"],
+               "received_at": last.get("t") or s.get("received_at")}
+    if last.get("hr"):
+        summary["ending_hr"] = last["hr"]
+    for k in ("recovery_hr", "calories_total"):   # both describe the untrimmed piece
+        summary.pop(k, None)
+    return {**sess, "summary": summary, "strokes": kept}, cut
+
+
+def build_splits(sess: dict) -> list[dict]:
+    """The PM5's own splits, rebuilt from the strokes: its summary (0x003A) gives the split type
+    (0 = time in seconds, 1 = distance in metres) and size, and each boundary is placed by linear
+    interpolation between the strokes either side. The Logbook passes splits on to Strava as laps,
+    which is why a row posted without them arrives there as one undivided block."""
+    s, strokes = sess.get("summary") or {}, [st for st in (sess.get("strokes") or []) if st.get("elapsed_s") is not None]
+    size, kind = s.get("split_size"), s.get("split_type")
+    total_t, total_d = s.get("elapsed_s"), s.get("distance_m")
+    if not size or kind not in (0, 1) or not strokes or not total_t or not total_d:
+        return []
+    pts = [(0.0, 0.0)] + [(st["elapsed_s"], st["distance_m"]) for st in strokes] + [(total_t, total_d)]
+    by = 0 if kind == 0 else 1                  # the coordinate the boundaries are set on
+
+    def at(value):                              # (time, distance) where `by` reaches value
+        for (t0, d0), (t1, d1) in zip(pts, pts[1:]):
+            a, b = (t0, t1) if by == 0 else (d0, d1)
+            if a <= value <= b and b > a:
+                f = (value - a) / (b - a)
+                return t0 + f * (t1 - t0), d0 + f * (d1 - d0)
+        return pts[-1]
+
+    end = total_t if kind == 0 else total_d
+    bounds = [k * size for k in range(1, int(end // size) + 1) if k * size < end - 1e-6] + [end]
+    out, prev_t, prev_d, prev_T, prev_D = [], 0.0, 0.0, 0, 0
+    for b in bounds:
+        t, d = (total_t, total_d) if b == end else at(b)
+        inside = [st for st in strokes if prev_t < st["elapsed_s"] <= t]
+        T, D = round(t * 10), round(d)          # round the running totals, so the splits sum exactly
+        split = {"time": T - prev_T, "distance": D - prev_D}
+        spm = sorted(st["spm"] for st in inside if st.get("spm"))
+        if spm:   # the median: nudging the handle while resting at the end reads as 60-100 spm
+            split["stroke_rate"] = spm[len(spm) // 2]
+        beats = [st["hr"] for st in inside if st.get("hr") and st["hr"] != 255]
+        if beats:
+            split["heart_rate"] = {"average": round(sum(beats) / len(beats)), "min": min(beats),
+                                   "max": max(beats), "ending": beats[-1]}
+        if split["time"] > 0 and split["distance"] > 0:
+            out.append(split)
+        prev_t, prev_d, prev_T, prev_D = t, d, T, D
+    return out
+
+
 def build_payload(sess: dict) -> dict:
+    sess, rest_cut = trim_rest(sess)
     s, strokes = sess.get("summary") or {}, sess.get("strokes") or []
     if not s.get("distance_m") or not s.get("elapsed_s"):
         raise ValueError("no end-of-workout summary: the piece wasn't ended on the PM5, so there is nothing to post")
@@ -100,6 +176,11 @@ def build_payload(sess: dict) -> dict:
             payload[key] = val
     if hr:
         payload["heart_rate"] = hr
+    if rest_cut:
+        payload["comments"] += f" {rest_cut:.0f} s of rest at the end left out."
+    splits = build_splits(sess)
+    if len(splits) > 1:
+        payload["workout"] = {"splits": splits}
     return payload
 
 

@@ -115,6 +115,7 @@
   #g_check { display: flex; gap: 14px; flex-wrap: wrap; font-size: 1.1rem; font-variant-numeric: tabular-nums; }
   #g_check .ok { color: var(--good); } #g_check .off { color: var(--warn); }
   #g_next, #g_said { font-size: .82rem; color: var(--ink3); margin-top: 4px; }
+  #g_plan { margin-top: 4px; color: var(--ink2); } #g_plan.warn { color: var(--warn); } #g_plan.err { color: #e5534b; }
   @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
 </style>
 </head>
@@ -174,6 +175,7 @@
     <button id="g_sim" hidden>Simulate a rower</button>
   </div>
   <div class="note" id="g_about"></div>
+  <div class="note" id="g_plan"></div>
   <div id="g_live" hidden>
     <div id="g_block"></div>
     <div style="display:flex; align-items:baseline; gap:18px; flex-wrap:wrap"><div id="g_big"></div><div id="g_left"></div></div>

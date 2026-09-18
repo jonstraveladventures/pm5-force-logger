@@ -40,7 +40,7 @@ Then open `http://localhost:8765`. "Try the sample" plays a synthetic row throug
 
 ## Guided sessions (browser version)
 
-The page can run a session for you: it speaks each instruction ("17 strokes a minute, pace 2:12, for three and a half minutes"), shows the target in large type with a countdown and a check that you are on it, and reports at the end. The report is saved with the row. Row a Just Row piece on the monitor and press Start.
+The page can run a session for you, fitted to the length you want: set the piece on the monitor (a 30-minute piece, say) or type the total, and the warm-up and blocks share that time out, with a line under the settings showing how ("30:00 of rowing: 8:00 warm-up, then 6 blocks of 3:40"). If the time is too short for the blocks to give reliable numbers it says so, and if it is far too short it says what length would do. It speaks each instruction ("17 strokes a minute, pace 2:12, for three and a half minutes"), shows the target in large type with a countdown and a check that you are on it, and reports at the end. The report is saved with the row. Row a Just Row piece on the monitor and press Start.
 
 - **Best stroke rate at a fixed pace.** Rows each rate twice in a palindrome (14, 17, 20, 20, 17, 14), so the steady rise in heart rate over a row lands equally on every rate and cancels out. Heart rate over the last two minutes of each block, adjusted to the target power, shows which rate costs you least, and how much heart rate drifted per minute.
 - **Heart-rate-capped row.** Steers the pace to keep heart rate under a ceiling and reports the watts you held there. Rowed regularly, that number is a direct measure of aerobic progress.

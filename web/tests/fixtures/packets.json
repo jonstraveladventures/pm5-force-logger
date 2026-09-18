@@ -25,7 +25,9 @@
    "workout_state": "workout_row",
    "rowing_state": 1,
    "stroke_state": 2,
-   "drag_factor": 116
+   "drag_factor": 116,
+   "piece_type": "distance",
+   "piece_length": 0.0
   }
  },
  {
@@ -38,7 +40,24 @@
    "workout_state": "interval_rest",
    "rowing_state": 1,
    "stroke_state": 2,
-   "drag_factor": 120
+   "drag_factor": 120,
+   "piece_type": "distance",
+   "piece_length": 0.0
+  }
+ },
+ {
+  "short": 49,
+  "hex": "8c0a00d20400050001010200000020bf020071",
+  "expected": {
+   "elapsed_s": 27.0,
+   "distance_m": 123.4,
+   "workout_type": 5,
+   "workout_state": "workout_row",
+   "rowing_state": 1,
+   "stroke_state": 2,
+   "drag_factor": 113,
+   "piece_type": "time",
+   "piece_length": 1800.0
   }
  },
  {

@@ -28,7 +28,7 @@ test("the rate test rows each rate twice in a palindrome", () => {
   const p = G.rateTest();
   assert.deepEqual(p.blocks.filter(b => b.role === "test").map(b => b.key), [14, 17, 20, 20, 17, 14]);
   const eng = new G.Engine(p);
-  assert.equal(eng.total, 300 + 6 * 210 + 60);
+  assert.equal(eng.total, 1800 + 60);                  // 30 minutes of rowing, then the recovery minute
   // every rate's two blocks are centred on the same time, so a steady drift is shared equally
   const mids = k => eng.blocks.filter(b => b.key === k).map(b => (b.start + b.end) / 2);
   const centre = k => (mids(k)[0] + mids(k)[1]) / 2;
@@ -49,11 +49,57 @@ test("the rate test finds the simulator's best rate despite heart-rate drift", (
 test("cues come at every block change, ten seconds before, and at the end", () => {
   const { eng, events } = run(G.rateTest());
   const texts = events.map(e => e.text);
-  assert.equal(texts.filter(t => /strokes a minute, pace 2:12, for 3 and a half minutes/.test(t)).length, 6);
+  assert.equal(texts.filter(t => /strokes a minute, pace 2:12, for 3 minutes 40 seconds/.test(t)).length, 6);
   assert.equal(texts.filter(t => t.startsWith("In ten seconds")).length, eng.blocks.length - 1);
   assert.ok(texts.some(t => /Stop rowing/.test(t)));
   assert.equal(texts[texts.length - 1], "Session complete. End the piece on the monitor when you're ready.");
   assert.ok(eng.done);
+});
+
+test("a session fills the rowing time it is given, and the blocks share it evenly", () => {
+  for (const total of [26, 30, 42]) {                  // 20 minutes is refused, see the next test
+    const p = G.rateTest({ total_s: total * 60 }), rowing = p.blocks.filter(b => b.role !== "recovery").reduce((a, b) => a + b.s, 0);
+    assert.equal(rowing, total * 60, `${total} min`);
+    const tests = p.blocks.filter(b => b.role === "test").map(b => b.s);
+    assert.equal(new Set(tests).size, 1, "all six blocks the same length");
+    assert.ok(tests[0] % 5 === 0);
+    assert.ok(p.blocks[0].s >= 480, "any spare seconds go to the warm-up");
+  }
+  for (const [kind, def] of Object.entries(G.PROTOCOLS)) {
+    if (kind === "readiness") continue;
+    const params = Object.fromEntries(def.fields.map(([name, , dflt, type]) => [name, G.parseField(dflt, type)]));
+    params.total = 33;
+    const p = def.build(params), rowing = p.blocks.filter(b => b.role !== "recovery").reduce((a, b) => a + b.s, 0);
+    assert.equal(rowing, 33 * 60, `${kind} fills 33 minutes`);
+  }
+});
+
+test("too short a session warns, and far too short is refused with the length that would do", () => {
+  assert.deepEqual(G.rateTest({ total_s: 1800 }).warnings, []);
+  const w = G.rateTest({ total_s: 25 * 60 }).warnings;                 // (25 - 8) min over 6 blocks = 2:50 each
+  assert.equal(w.length, 1);
+  assert.match(w[0], /only 2:50/);
+  assert.match(w[0], /About 26 minutes/);
+  assert.throws(() => G.rateTest({ total_s: 20 * 60 }), /too short.*at least 26 minutes/);
+  assert.throws(() => G.hrCap({ total_s: 8 * 60 }), G.TooShort);
+  assert.equal(G.driftTest({ total_s: 20 * 60 }).warnings.length, 1);
+  assert.equal(G.stepTest({ total_s: 21 * 60 }).warnings.length, 0);
+});
+
+test("the session length comes from the piece on the monitor", () => {
+  assert.deepEqual(G.pieceSeconds({ piece_type: "time", piece_length: 1800 }, {}), { s: 1800, note: "fitted to the 30:00 piece on the monitor" });
+  const d = G.pieceSeconds({ piece_type: "distance", piece_length: 5000 }, { pace: 132 });
+  assert.equal(d.s, 1320);
+  assert.match(d.note, /5000 m piece.*22:00 at 2:12/);
+  assert.equal(G.pieceSeconds({ piece_type: "distance", piece_length: 5000 }, {}), null, "no fixed pace, no estimate");
+  assert.equal(G.pieceSeconds({ piece_type: "distance", piece_length: 0 }, { pace: 132 }), null, "a Just Row has no length");
+  assert.equal(G.pieceSeconds({}, {}), null);
+});
+
+test("a readiness check in place of the warm-up keeps the total", () => {
+  const p = G.withReadiness(G.rateTest({ total_s: 1800 }), { watts: 115 });
+  assert.equal(p.blocks.filter(b => b.role !== "recovery").reduce((a, b) => a + b.s, 0), 1800);
+  assert.equal(p.blocks[0].s, 480);
 });
 
 test("the drag sweep finds the damper setting the simulator likes", () => {
@@ -65,7 +111,7 @@ test("the drag sweep finds the damper setting the simulator likes", () => {
 
 test("the capped row holds heart rate at the ceiling and reports the watts there", () => {
   const sim = { seed: 5, spmOpt: 17, drift: 0.4 };
-  const { r, eng, text } = run(G.hrCap({ ceiling: 148, minutes: 25, start_pace_s: 140 }), sim);
+  const { r, eng, text } = run(G.hrCap({ ceiling: 148, total_s: 1500, start_pace_s: 140 }), sim);
   const h = r.hrcap;
   assert.ok(h.over_frac < 0.2, `time over the ceiling ${h.over_frac}`);
   assert.ok(h.last.hr > 142 && h.last.hr < 149.5, `last-10-minute heart rate ${h.last.hr}`);
@@ -78,9 +124,9 @@ test("the capped row holds heart rate at the ceiling and reports the watts there
 });
 
 test("the drift test measures decoupling, and none when the heart rate doesn't drift", () => {
-  const withDrift = run(G.driftTest({ watts: 140, minutes: 35 }), { drift: 0.4, seed: 9 }).r.drift.decoupling_pct;
+  const withDrift = run(G.driftTest({ watts: 140, total_s: 2100 }), { drift: 0.4, seed: 9 }).r.drift.decoupling_pct;
   assert.ok(withDrift > 3 && withDrift < 6, `decoupling ${withDrift}`);
-  const none = run(G.driftTest({ watts: 140, minutes: 35 }), { drift: 0, seed: 9 }).r.drift.decoupling_pct;
+  const none = run(G.driftTest({ watts: 140, total_s: 2100 }), { drift: 0, seed: 9 }).r.drift.decoupling_pct;
   assert.ok(Math.abs(none) < 1, `decoupling without drift ${none}`);
 });
 
@@ -136,7 +182,7 @@ test("fatigue onset is found when peak position moves later and stays, and not o
 
 test("stopping early still gives a report on the blocks that were rowed", () => {
   const eng = new G.Engine(G.rateTest()), sim = new SimRower({ seed: 29 });
-  for (let t = 0; t < 900; t++) {
+  for (let t = 0; t < 1000; t++) {                     // warm-up 8:00, then 14 to 11:40 and 17 to 15:20
     const target = eng.started ? eng.target(eng.indexAt(t - eng.t0)) : null;
     for (const rec of sim.advance(t, 1, target)) { eng.begin(rec.t); eng.stroke(simSample(rec)); }
     eng.tick(t, sim.status());
@@ -156,4 +202,11 @@ test("every menu entry builds a protocol from its default fields", () => {
     assert.ok(new G.Engine(p).total > 300);
     for (const b of p.blocks) assert.ok(b.cue && !/NaN|undefined/.test(b.cue), `${kind}: ${b.cue}`);
   }
+});
+
+test("the plan reads as plain words", () => {
+  assert.equal(G.describePlan(G.rateTest({ total_s: 1800 })), "30:00 of rowing: 8:00 warm-up, then 6 blocks of 3:40, then a minute sitting still.");
+  assert.equal(G.describePlan(G.hrCap({ total_s: 1500 })), "25:00 of rowing: 5:00 warm-up, then 20:00 of the capped row, then a minute sitting still.");
+  assert.match(G.describePlan(G.drillSession({ total_s: 1200, repeats: 3 })), /^20:00 of rowing: 5:00 warm-up, then 3 × \(3:00 drill \+ 2:00 easy\)\.$/);
+  assert.match(G.describePlan(G.withReadiness(G.rateTest({ total_s: 1800 }))), /8:00 readiness check/);
 });
