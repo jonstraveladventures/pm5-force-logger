@@ -50,3 +50,22 @@ test("default splits follow the Python rules", () => {
   assert.equal(C.defaultSplitS(1200), 240);
   assert.equal(C.defaultSplitS(300), 60);
 });
+
+test("heart-rate monitor: the query, the answer and the pairing command", () => {
+  // query: start flag, 0x7E wrapper of 3 bytes holding 0x57 with one byte (user 0), checksum 0x2B, stop flag
+  assert.equal(hex(C.hrBeltQueryFrame()), "f17e035701002bf2");
+  // an answer laid out as the spec gives it: status, then 0x7E 9 0x57 7 user mfg type id (most significant first)
+  const [status, body] = C.unframe(C.frame([0x81, 0x7e, 9, 0x57, 7, 0, 1, 120, 0x12, 0x34, 0x56, 0x78]));
+  assert.equal(status, 0x81);
+  assert.deepEqual(C.parseHrBelt(body), { user: 0, mfg: 1, type: 120, id: 0x12345678 });
+  assert.equal(C.parseHrBelt(Uint8Array.from([0x7e, 3, 0x56, 1, 0])), null, "a different command's answer");
+  // pairing sends the same seven bytes back, in the 0x77 wrapper with 0x39; a command frame has no
+  // status byte, so what unframe calls the status is the wrapper's first byte
+  const [first, rest] = C.unframe(C.hrBeltPairFrame({ mfg: 1, type: 120, id: 0x12345678 }));
+  assert.equal(hex([first, ...rest]), "770939070001781234" + "5678");
+  // a belt ID with its top bit set comes out as a positive number, both ways
+  const big = C.unframe(C.frame([0x81, 0x7e, 9, 0x57, 7, 0, 1, 120, 0xf2, 0x00, 0x00, 0x01]))[1];
+  assert.equal(C.parseHrBelt(big).id, 0xf2000001);
+  const [f2, r2] = C.unframe(C.hrBeltPairFrame({ mfg: 1, type: 120, id: 0xf2000001 }));
+  assert.equal(hex([f2, ...r2]).slice(-8), "f2000001");
+});

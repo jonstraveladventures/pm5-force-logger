@@ -1,6 +1,6 @@
 // The page: connects to the PM5, feeds its notifications through the Session, drives the
 // dashboard, programs workouts, saves finished rows in the browser and shows the fitness report.
-import { Session, readRaw, bytesToHex, AFTER_END_S } from "./decode.js";
+import { Session, readRaw, bytesToHex, AFTER_END_S, parse } from "./decode.js";
 import * as C from "./csafe.js";
 import * as V from "./vo2.js";
 import * as BLE from "./ble.js";
@@ -32,6 +32,7 @@ function startSession() {
 }
 
 function onPacket(t, short, b) {
+  if (short === 0x003b) { const p = parse(short, b); if (p && p.hrm_id) rememberHrm({ mfg: p.hrm_mfg, type: p.hrm_type, id: p.hrm_id }, "paired with"); }
   const line = { t: Math.round(t * 1000) / 1000, uuid: short.toString(16).padStart(4, "0"), hex: bytesToHex(b) };
   if (!state.session) {                 // between pieces: keep showing the last one until the next stroke arrives
     if (short !== 0x0035) return;
@@ -92,6 +93,7 @@ async function connect() {
   state.meta.workout = undefined;
   startSession();
   updateWake();
+  syncHeartRateMonitor();
   setConn(`live: ${state.pm.info.name}${state.pm.info.firmware_rev ? ", firmware " + state.pm.info.firmware_rev : ""}. Row when ready; end the piece on the PM5 (Menu)`, "live");
 }
 
@@ -106,6 +108,36 @@ async function onDisconnected() {
 async function stop() {
   if (state.session && state.session.strokes.size) await finish("stopped");
   if (state.pm) state.pm.disconnect();   // onDisconnected does the rest
+}
+
+// ---------- the heart-rate monitor: remembered here, paired by the PM5 ----------
+// The PM5 reports the monitor it is paired with (a CSAFE query on connect, and characteristic
+// 0x003B whenever it changes). The page remembers it, and on a later connection where the PM5
+// has nothing paired it asks the PM5 to pair with that one, saving a trip through its menus.
+const loadHrm = () => { try { return JSON.parse(localStorage.getItem("pm5_hrm")); } catch { return null; } };
+const hrmName = m => `monitor ${m.id.toString(16).toUpperCase().padStart(8, "0")}`;
+function showHrm(text, known) {
+  $("hrm").innerHTML = text ? `${text}${known ? ' <a href="#" id="hrm_forget" title="Stop pairing this monitor automatically">forget</a>' : ""}` : "";
+  const f = $("hrm_forget");
+  if (f) f.addEventListener("click", e => { e.preventDefault(); localStorage.removeItem("pm5_hrm"); showHrm("heart rate: monitor forgotten", false); });
+}
+function rememberHrm(m, verb) {
+  try { localStorage.setItem("pm5_hrm", JSON.stringify({ mfg: m.mfg, type: m.type, id: m.id })); } catch { /* private window */ }
+  showHrm(`heart rate: ${verb} ${hrmName(m)}`, true);
+}
+async function syncHeartRateMonitor() {
+  if (!state.pm || !state.pm.control) return;
+  try {
+    const [, resp] = await state.pm.send(C.hrBeltQueryFrame());
+    const now = C.parseHrBelt(resp), saved = loadHrm();
+    if (now && now.id) return rememberHrm(now, "paired with");
+    if (saved && saved.id) {
+      const [st] = await state.pm.send(C.hrBeltPairFrame(saved));
+      if (st & 0x30) throw new Error(`the PM5 said ${C.describeStatus(st)}`);
+      return showHrm(`heart rate: asked the PM5 to pair with ${hrmName(saved)}`, true);
+    }
+    showHrm("heart rate: nothing paired; pair once on the monitor and the page will remember it", false);
+  } catch (e) { showHrm(`heart rate: couldn't check the monitor (${e.message})`, !!loadHrm()); }
 }
 
 // ---------- programming the PM5 ----------
@@ -224,7 +256,7 @@ $("sessions_list").addEventListener("click", async e => {
     const sm = s.summary || {}, last = s.strokes[s.strokes.length - 1] || {};   // the status the PM5 left is the reset screen, so show the piece's totals
     const status = { elapsed_s: sm.elapsed_s ?? last.elapsed_s, distance_m: sm.distance_m ?? last.distance_m, avg_pace_s: sm.avg_pace_s, pace_s: last.pace_s,
       stroke_rate: sm.avg_stroke_rate ?? last.spm, hr: last.hr, drag_factor: sm.drag_factor_avg, calories_total: sm.calories_total, avg_power_w: sm.avg_watts, workout_type: sm.workout_type };
-    H.snapshot({ status, summary: sm, strokes: s.strokes }); $("banner").textContent = `showing ${id}`; render();
+    H.snapshot({ status, summary: sm, strokes: s.strokes, splits: s.splits || [] }); $("banner").textContent = `showing ${id}`; render();
     showFitness([[id, s]]);
   } else if (act === "json") {
     DB.download(`${id}.json`, JSON.stringify(await DB.getSession(id), null, 1));

@@ -79,7 +79,32 @@ class ParseTests(unittest.TestCase):
             self.assertIsNone(L.parse(short, bytes(n)), f"0x{short:04x} with {n} bytes")
 
     def test_unknown_characteristic_is_ignored(self):
-        self.assertIsNone(L.parse(0x003E, bytes(19)))
+        self.assertIsNone(L.parse(0x0080, bytes(19)))   # the multiplexed characteristic, which the logger leaves raw
+
+
+class DocumentedInRev036Tests(unittest.TestCase):
+    """Characteristics documented in revision 0.36 of Concept2's CSAFE definition (August 2026),
+    checked against packets a PM5 sent on 2026-09-18."""
+    SPLIT = bytes.fromhex("3675002a2c00b80b006a0400000000000001")
+    SPLIT_AVGS = bytes.fromhex("367500107c002f0545002e03b60e9600750100")
+
+    def test_split_and_its_averages_merge_by_split_number(self):
+        s = L.Session()
+        s.feed(300.1, 0x0037, self.SPLIT)
+        s.feed(300.2, 0x0038, self.SPLIT_AVGS)
+        (sp,) = s.result({})["splits"]
+        self.assertEqual((sp["split_number"], sp["split_time_s"], sp["split_distance_m"]), (1, 300.0, 1130))
+        self.assertEqual((sp["split_spm"], sp["split_hr"], sp["split_power_w"], sp["split_drag"]), (16, 124, 150, 117))
+        self.assertAlmostEqual(sp["split_pace_s"], 132.7)
+
+    def test_additional_status_3_carries_the_battery(self):
+        p = L.parse(0x003E, bytes([2, 0, 3, 1, 0, 0, 0, 0, 0, 0, 0, 0, 78] + [0] * 6))
+        self.assertEqual((p["op_state"], p["screen"], p["battery_pct"]), (2, 259, 78))
+        s = L.Session(); s.feed(1.0, 0x003E, bytes([2, 0, 3, 1, 0, 0, 0, 0, 0, 0, 0, 0, 78] + [0] * 6))
+        self.assertEqual(s.status["battery_pct"], 78)
+
+    def test_heart_rate_belt_id_is_32_bits_little_endian(self):
+        self.assertEqual(L.parse(0x003B, bytes([1, 120, 0x78, 0x56, 0x34, 0x12])), {"hrm_mfg": 1, "hrm_type": 120, "hrm_id": 0x12345678})
 
 
 class ForceCurveTests(unittest.TestCase):

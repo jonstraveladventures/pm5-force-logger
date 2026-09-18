@@ -169,6 +169,29 @@ export function build(spec) {
 
 export const terminateFrame = () => frame(wrap(longCmd(SET_SCREENSTATE, [SCREEN_WORKOUT, TERMINATE_WORKOUT])));
 
+// ---------------------------------------------------------------------------- heart-rate monitor
+// Spec rev 0.36, "Communicating with the PM using CSAFE Commands": CSAFE_PM_GET_EXTENDED_HRBELT_INFO
+// (0x57, a long get-configuration command, so inside the 0x7E wrapper) returns the user number,
+// manufacturer ID, device type and a 32-bit belt ID, most significant byte first; sending the same
+// seven bytes back with CSAFE_PM_SET_EXTENDED_HRBELT_INFO (0x39, a long set-data command, inside
+// 0x77) asks the PM5 to pair with that monitor. Over Bluetooth neither needs authentication.
+const GETPMCFG = 0x7e, SETPMDATA = 0x77, GET_EXT_HRBELT = 0x57, SET_EXT_HRBELT = 0x39;
+const wrapIn = (id, ...cmds) => { const body = cmds.flat(); return [id, body.length, ...body]; };
+const idBytes = id => [(id >>> 24) & 0xff, (id >>> 16) & 0xff, (id >>> 8) & 0xff, id & 0xff];
+
+export const hrBeltQueryFrame = (user = 0) => frame(wrapIn(GETPMCFG, longCmd(GET_EXT_HRBELT, [user])));
+
+/** {user, mfg, type, id} from the responses unframe() returns, or null if they aren't the answer. */
+export function parseHrBelt(resp) {
+  let i = resp[0] === GETPMCFG ? 2 : 0;
+  if (resp[i] !== GET_EXT_HRBELT) return null;
+  const d = resp.slice(i + 2, i + 2 + resp[i + 1]);
+  if (d.length < 7) return null;
+  return { user: d[0], mfg: d[1], type: d[2], id: ((d[3] << 24) | (d[4] << 16) | (d[5] << 8) | d[6]) >>> 0 };
+}
+
+export const hrBeltPairFrame = ({ user = 0, mfg, type, id }) => frame(wrapIn(SETPMDATA, longCmd(SET_EXT_HRBELT, [user, mfg, type, ...idBytes(id)])));
+
 // ---------------------------------------------------------------------------- the mini-syntax
 
 const TIME_RE = /^(?:(\d+):)?(\d{1,2}):(\d{2})$/, DIST_RE = /^(\d+(?:\.\d+)?)(m|km)$/, CAL_RE = /^(\d+)cal$/;

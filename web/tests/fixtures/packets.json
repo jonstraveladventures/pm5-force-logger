@@ -157,12 +157,66 @@
   }
  },
  {
+  "short": 55,
+  "hex": "3675002a2c00b80b006a0400000000000001",
+  "expected": {
+   "elapsed_s": 300.06,
+   "distance_m": 1130.6,
+   "split_time_s": 300.0,
+   "split_distance_m": 1130,
+   "rest_time_s": 0,
+   "rest_distance_m": 0,
+   "split_type": 0,
+   "split_number": 1
+  }
+ },
+ {
+  "short": 56,
+  "hex": "367500107c002f0545002e03b60e9600750100",
+  "expected": {
+   "elapsed_s": 300.06,
+   "split_spm": 16,
+   "split_hr": 124,
+   "split_rest_hr": null,
+   "split_pace_s": 132.7,
+   "split_calories": 69,
+   "split_cal_per_hr": 814,
+   "split_speed_ms": 3.766,
+   "split_power_w": 150,
+   "split_drag": 117,
+   "split_number": 1,
+   "machine_type": 0
+  }
+ },
+ {
+  "short": 62,
+  "hex": "0200030100000000000000004e000000000000",
+  "expected": {
+   "op_state": 2,
+   "verification": 0,
+   "screen": 259,
+   "last_error": 0,
+   "game_id": 0,
+   "game_score": 0,
+   "battery_pct": 78
+  }
+ },
+ {
+  "short": 59,
+  "hex": "017878563412",
+  "expected": {
+   "hrm_mfg": 1,
+   "hrm_type": 120,
+   "hrm_id": 305419896
+  }
+ },
+ {
   "short": 53,
   "hex": "393000d71100",
   "expected": null
  },
  {
-  "short": 62,
+  "short": 128,
   "hex": "00000000000000000000000000000000000000",
   "expected": null
  }

@@ -80,7 +80,7 @@
 </head>
 <body>
 <header>
-  <h1>PM5 Live</h1><span id="conn">connecting…</span>
+  <h1>PM5 Live</h1><span id="conn">connecting…</span><span id="battery" style="font-size:.76rem;color:var(--ink3)"></span>
   <details id="display"><summary>Change the display ▾</summary><div class="sliders">
     <label>Text <input type="range" id="ui_text" min="0.7" max="2" step="0.05"> <span id="ui_text_v"></span></label>
     <label>Curve height <input type="range" id="ui_h" min="140" max="640" step="10"> <span id="ui_h_v"></span></label>
@@ -111,7 +111,7 @@
     <div class="row" style="justify-content: space-between">
       <h2>Force curve</h2>
       <div class="row">
-        <label>Curve <select id="src"><option value="force_curve_v2">new channel (one point per reading)</option><option value="force_curve">documented channel (time steps)</option></select></label>
+        <label>Curve <select id="src"><option value="force_curve_v2">force v handle travel (0x0043)</option><option value="force_curve">force v time (0x003D)</option></select></label>
         <label>Compare to <select id="refsel"><option value="kleshnev">Kleshnev shape (front-loaded)</option><option value="rp3">RP3 shape (rounded, peak 45%)</option><option value="mine">my saved reference</option></select></label>
         <button id="saveref" title="Store this session's average curve as your personal reference">Save average as my reference</button>
       </div>
@@ -140,11 +140,18 @@
   <table id="table"><thead><tr>
     <th>Stroke</th><th>Drive m</th><th>Drive s</th><th>Recov s</th><th>Ratio</th><th>Dist/stroke m</th><th>Peak lbf</th><th>Avg lbf</th><th>Work J</th><th>Power W</th><th>Peak pos</th><th>Rect idx</th><th>HR</th>
   </tr></thead><tbody></tbody></table>
+  <table id="splits" hidden style="margin-top: 14px"><thead><tr>
+    <th>Split</th><th>Time</th><th>Metres</th><th>Pace</th><th>Rate</th><th>Watts</th><th>HR</th><th>Drag</th>
+  </tr></thead><tbody></tbody></table>
 </div>
 
 <script>
 // ---------- state ----------
-const S = { strokes: new Map(), status: {}, summary: {}, device: {} };
+const S = { strokes: new Map(), status: {}, summary: {}, device: {}, splits: new Map() };
+// Characteristic 0x0043 is force against handle travel: each reading is 3.5/3 inches of the handle
+// moving away from the flywheel (Concept2, for RowErg models B to D). 0x003D is force against time.
+const CM_PER_POINT = 3.5 / 3 * 2.54;
+const handleCm = pts => { const t = trim(pts); return t ? t.length * CM_PER_POINT : null; };
 const TARGETS = {  // Kleshnev (2011), Biomechanics of Rowing, via biomex.studio; on-water gate force, so guides not rules
   a100: { lo: 0, hi: 40, label: "≤40%" }, a70: { lo: 0, hi: 17, label: "≤17%" },
   d70: { lo: 28, hi: 40, label: "28–40%" }, ram: { lo: 38, hi: 64, label: "38–64%" }, dips: { lo: 0, hi: 0, label: "none" },
@@ -233,6 +240,7 @@ function renderTiles() {
   setTile("stroke", last ? `${n1(last.stroke_distance_m)} m` : "—", last ? `work ${n0(last.work_j)} J` : "");
   setTile("drag", n0(st.drag_factor), S.summary.drag_factor_avg ? `session ${S.summary.drag_factor_avg}` : "");
   setTile("cal", n0(st.calories_total), "kcal");
+  const bt = document.getElementById("battery"); if (bt) bt.textContent = st.battery_pct ? `PM5 battery ${st.battery_pct}%` : "";
 }
 
 // ---------- charts ----------
@@ -263,8 +271,9 @@ function drawCurve() {
   g.strokeStyle = css("--grid"); g.lineWidth = 1; g.fillStyle = css("--ink3"); g.font = canvasFont();
   for (let f = 0; f <= ymax; f += ymax > 150 ? 50 : 25) { const y = pad.t + ph - f / ymax * ph; g.beginPath(); g.moveTo(pad.l, y); g.lineTo(w - pad.r, y); g.stroke(); g.fillText(`${f}`, 8, y + 4); }
   g.textAlign = "center";
-  for (let p = 0; p <= 100; p += 20) g.fillText(`${p}%`, pad.l + p / 100 * pw, pad.t + ph + 16);
-  g.fillText("drive, from first force to release (normalised)", pad.l + pw / 2, h - 6);
+  const lenCm = src() === "force_curve_v2" && cur ? handleCm(cur[src()]) : null;
+  for (let p = 0; p <= 100; p += 20) g.fillText(lenCm ? `${Math.round(p / 100 * lenCm)}` : `${p}%`, pad.l + p / 100 * pw, pad.t + ph + 16);
+  g.fillText(lenCm ? "handle travel from first force, cm (this stroke)" : "drive time, from first force to release (normalised)", pad.l + pw / 2, h - 6);
   g.save(); g.translate(12, pad.t + ph / 2); g.rotate(-Math.PI / 2); g.fillText("force (lbf)", 0, 0); g.restore();
   g.textAlign = "left";
   const X = i => pad.l + i / 100 * pw, Y = f => pad.t + ph - f / ymax * ph;
@@ -277,7 +286,7 @@ function drawCurve() {
   if (curM) { g.fillStyle = css("--s1"); g.beginPath(); g.arc(X(curM.a100), Y(curM.fmax), 4, 0, 7); g.fill(); }
   if (hoverX != null && cur) { const i = Math.round(Math.max(0, Math.min(100, (hoverX - pad.l) / pw * 100))); g.strokeStyle = css("--ink3"); g.beginPath(); g.moveTo(X(i), pad.t); g.lineTo(X(i), pad.t + ph); g.stroke();
     const r = resample(trim(cur[src()])); const ref = reference();
-    document.getElementById("hover").textContent = `${i}% of drive · this stroke ${n0(r[i])} lbf · average ${avg ? n0(avg[i] * scale) : "—"} · reference ${ref ? n0(ref[i] * scale) : "—"}`; }
+    document.getElementById("hover").textContent = `${i}% of drive${lenCm ? ` (${Math.round(i / 100 * lenCm)} cm)` : ""} · this stroke ${n0(r[i])} lbf · average ${avg ? n0(avg[i] * scale) : "—"} · reference ${ref ? n0(ref[i] * scale) : "—"}`; }
   else document.getElementById("hover").textContent = cur ? `stroke ${cur.stroke_count}: hover the chart to read values` : "waiting for the first stroke…";
 }
 document.getElementById("curve").addEventListener("mousemove", e => { hoverX = e.offsetX; drawCurve(); });
@@ -293,7 +302,7 @@ function renderMetrics() {
   const peakN = cur.peak_force_lbf ? cur.peak_force_lbf * 4.448 : null, mass = massKg();
   const bandRow = (name, value, unit, key, note) => B && value != null ? [[name, `${unit === "m" ? n2(value) : n0(value)} ${unit}`, `RP3 ${document.getElementById("bands").value}: ${bandText(B[key])}`, `<span class="flag">${bandOf(value, B[key])}</span>`, note]] : [];
   const rows = [
-    ["Peak position", `${m.a100}%`, label(T.a100), flag(m.a100, T.a100, "early", "late"), "Where in the drive force peaks. Kleshnev's crews peak early (legs); RP3's rounded stroke peaks just before the oar is square, around 43–48%. Later than 55% points to the back taking over from the legs."],
+    ["Peak position", src() === "force_curve_v2" ? `${m.a100}% · ${Math.round(m.a100 / 100 * handleCm(cur[src()]))} cm` : `${m.a100}%`, label(T.a100), flag(m.a100, T.a100, "early", "late"), "Where in the drive force peaks. Kleshnev's crews peak early (legs); RP3's rounded stroke peaks just before the oar is square, around 43–48%. Later than 55% points to the back taking over from the legs."],
     ["Catch gradient", `${m.a70}%`, label(T.a70), flag(m.a70, T.a70, "", "slow"), "How far into the drive before force reaches 70% of peak: how quickly the legs load."],
     ["Finish plateau", `${m.d70}%`, label(T.d70), flag(m.d70, T.d70, "short", "long"), "How long force stays above 70% of peak after the peak: the back and arms carrying it on."],
     ["Rectangle index", `${n0(m.ram)}%`, label(T.ram), flag(m.ram, T.ram, "peaky", "flat"), "Average force as a share of peak. Higher is a fuller curve; a parabola scores 67%."],
@@ -341,6 +350,13 @@ function drawTrends() {
   });
 }
 
+function renderSplits() {
+  const tb = document.getElementById("splits"); if (!tb) return;
+  const list = [...S.splits.values()].sort((a, b) => a.split_number - b.split_number);
+  tb.hidden = !list.length;
+  tb.querySelector("tbody").innerHTML = list.map(sp => `<tr><td>${sp.split_number}</td><td>${fmtTime(sp.split_time_s)}</td><td>${sp.split_distance_m ?? "—"}</td><td>${fmtPace(sp.split_pace_s)}</td><td>${sp.split_spm ?? "—"}</td><td>${sp.split_power_w ?? "—"}</td><td>${sp.split_hr ?? "—"}</td><td>${sp.split_drag ?? "—"}</td></tr>`).join("");
+}
+
 function renderTable() {
   const list = [...S.strokes.values()].sort((a, b) => b.stroke_count - a.stroke_count).slice(0, uiValue("rows"));
   document.querySelector("#table tbody").innerHTML = list.map(s => { const m = metrics(s[src()]); const ratio = s.recovery_time_s && s.drive_time_s ? `1:${n1(s.recovery_time_s / s.drive_time_s)}` : "—";
@@ -348,7 +364,7 @@ function renderTable() {
 }
 
 let pending = false;
-function render() { if (pending) return; pending = true; requestAnimationFrame(() => { pending = false; renderTiles(); drawCurve(); renderMetrics(); drawTrends(); renderTable(); }); }
+function render() { if (pending) return; pending = true; requestAnimationFrame(() => { pending = false; renderTiles(); drawCurve(); renderMetrics(); drawTrends(); renderTable(); renderSplits(); }); }
 window.addEventListener("resize", render);
 // ---------- display: sizes and what is shown, remembered per browser ----------
 // Sliders set a CSS variable (a null property means the value is only read by the code, like the
@@ -570,8 +586,10 @@ loadWorkouts();
 
 // ---------- live feed ----------
 const H = {
-  snapshot: d => { S.strokes.clear(); d.strokes.forEach(s => S.strokes.set(s.stroke_count, s)); S.status = d.status || {}; S.summary = d.summary || {}; },
-  reset: d => { S.strokes.clear(); S.status = {}; S.summary = {}; document.getElementById("banner").textContent = d.replay ? `replaying ${d.replay}` : ""; },
+  snapshot: d => { S.strokes.clear(); d.strokes.forEach(s => S.strokes.set(s.stroke_count, s)); S.status = d.status || {}; S.summary = d.summary || {};
+    S.splits.clear(); (d.splits || []).forEach(sp => S.splits.set(sp.split_number, sp)); },
+  split: d => { S.splits.set(d.split_number, { ...d }); },
+  reset: d => { S.strokes.clear(); S.splits.clear(); S.status = {}; S.summary = {}; document.getElementById("banner").textContent = d.replay ? `replaying ${d.replay}` : ""; },
   device: d => { S.device = d; document.getElementById("banner").textContent = `${d.name} · firmware ${d.firmware_rev}${d.workout ? " · " + d.workout : ""}`; },
   status: d => { S.status = d; },
   stroke: d => { S.strokes.set(d.stroke_count, d); },

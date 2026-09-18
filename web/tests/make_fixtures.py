@@ -47,8 +47,12 @@ def packets():
         (0x0036, le(6000, 3) + le(163, 2) + le(900, 2) + le(12, 2) + le(75000, 3) + le(5000, 3)),
         (0x003A, bytes([0, 0, 0, 0, 1]) + le(1000, 2) + bytes([5]) + le(316, 2) + le(159, 2)),
         (0x0039, bytes([0, 0, 0, 0]) + le(130000, 3) + le(50000, 3) + bytes([15, 149, 0, 0, 0, 116, 0, 3]) + le(1300, 2)),
+        (0x0037, bytes.fromhex("3675002a2c00b80b006a0400000000000001")),   # split 1 of 2026-09-18, as the PM5 sent it
+        (0x0038, bytes.fromhex("367500107c002f0545002e03b60e9600750100")),
+        (0x003E, bytes([2, 0, 3, 1, 0, 0, 0, 0, 0, 0, 0, 0, 78, 0, 0, 0, 0, 0, 0])),
+        (0x003B, bytes([1, 120, 0x78, 0x56, 0x34, 0x12])),
         (0x0035, le(12345, 3) + le(4567, 3)),      # too short
-        (0x003E, bytes(19)),                        # not decoded
+        (0x0080, bytes(19)),                        # not decoded: the multiplexed characteristic
     ]
     return [{"short": s, "hex": b.hex(), "expected": L.parse(s, b)} for s, b in cases]
 

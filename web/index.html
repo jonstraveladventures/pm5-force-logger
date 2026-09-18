@@ -128,6 +128,8 @@
   <label class="filebtn" title="Play back the raw log of a row you saved earlier">Replay a saved log<input type="file" id="replayfile" accept=".jsonl,application/x-ndjson" hidden></label>
   <span id="conn">not connected</span>
   <span id="wake" class="note" title="The page asks the browser to keep the screen on while you row"></span>
+  <span id="battery" class="note"></span>
+  <span id="hrm" class="note"></span>
   <details id="display" class="menu"><summary>Change the display ▾</summary><div class="sliders">
     <label>Text <input type="range" id="ui_text" min="0.7" max="2" step="0.05"> <span id="ui_text_v"></span></label>
     <label>Curve height <input type="range" id="ui_h" min="140" max="640" step="10"> <span id="ui_h_v"></span></label>
@@ -194,7 +196,7 @@
     <div class="row" style="justify-content: space-between">
       <h2>Force curve</h2>
       <div class="row">
-        <label>Curve <select id="src"><option value="force_curve_v2">new channel (one point per reading)</option><option value="force_curve">documented channel (time steps)</option></select></label>
+        <label>Curve <select id="src"><option value="force_curve_v2">force v handle travel (0x0043)</option><option value="force_curve">force v time (0x003D)</option></select></label>
         <label>Compare to <select id="refsel"><option value="kleshnev">Kleshnev shape (front-loaded)</option><option value="rp3">RP3 shape (rounded, peak 45%)</option><option value="mine">my saved reference</option></select></label>
         <button id="saveref" title="Store this session's average curve as your personal reference">Save average as my reference</button>
       </div>
@@ -222,6 +224,9 @@
 <div class="tablewrap" id="tablewrap">
   <table id="table"><thead><tr>
     <th>Stroke</th><th>Drive m</th><th>Drive s</th><th>Recov s</th><th>Ratio</th><th>Dist/stroke m</th><th>Peak lbf</th><th>Avg lbf</th><th>Work J</th><th>Power W</th><th>Peak pos</th><th>Rect idx</th><th>HR</th>
+  </tr></thead><tbody></tbody></table>
+  <table id="splits" hidden style="margin-top: 14px"><thead><tr>
+    <th>Split</th><th>Time</th><th>Metres</th><th>Pace</th><th>Rate</th><th>Watts</th><th>HR</th><th>Drag</th>
   </tr></thead><tbody></tbody></table>
 </div>
 

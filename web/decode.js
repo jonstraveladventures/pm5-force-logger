@@ -59,6 +59,22 @@ export function parse(short, b) {
   if (short === 0x003A && b.length >= 12) {
     return { split_type: b[4], split_size: u16(b, 5), split_count: b[7], calories_total: u16(b, 8), avg_watts: u16(b, 10) };
   }
+  if (short === 0x0037 && b.length >= 18) {    // a split or interval just finished (spec rev 0.36)
+    return { elapsed_s: u24(b, 0) / 100, distance_m: u24(b, 3) / 10, split_time_s: u24(b, 6) / 10, split_distance_m: u24(b, 9),
+      rest_time_s: u16(b, 12), rest_distance_m: u16(b, 14), split_type: b[16], split_number: b[17] };
+  }
+  if (short === 0x0038 && b.length >= 19) {    // the same split's averages
+    return { elapsed_s: u24(b, 0) / 100, split_spm: b[3], split_hr: b[4] === 0 || b[4] === 255 ? null : b[4],
+      split_rest_hr: b[5] === 0 || b[5] === 255 ? null : b[5], split_pace_s: u16(b, 6) / 10, split_calories: u16(b, 8),
+      split_cal_per_hr: u16(b, 10), split_speed_ms: u16(b, 12) / 1000, split_power_w: u16(b, 14), split_drag: b[16],
+      split_number: b[17], machine_type: b[18] };
+  }
+  if (short === 0x003B && b.length >= 6) {     // the heart-rate monitor the PM5 is paired with
+    return { hrm_mfg: b[0], hrm_type: b[1], hrm_id: (b[2] | b[3] << 8 | b[4] << 16 | b[5] << 24) >>> 0 };
+  }
+  if (short === 0x003E && b.length >= 13) {    // "additional status 3": state, screen, error, battery
+    return { op_state: b[0], verification: b[1], screen: u16(b, 2), last_error: u16(b, 4), game_id: b[9], game_score: u16(b, 10), battery_pct: b[12] };
+  }
   if (short === 0x0039 && b.length >= 20) {
     return { elapsed_s: u24(b, 4) / 100, distance_m: u24(b, 7) / 10, avg_stroke_rate: b[10], ending_hr: b[11], avg_hr: b[12],
       min_hr: b[13], max_hr: b[14], drag_factor_avg: b[15], recovery_hr: b[16], workout_type: b[17], avg_pace_s: u16(b, 18) / 10 };
@@ -95,7 +111,7 @@ const CURVES = { 0x003d: "force_curve", 0x0043: "force_curve_v2" };
  *  monitor (newPieceAt is set and further strokes are ignored), and emit(kind, data) feeds the page. */
 export class Session {
   constructor(emit) {
-    this.strokes = new Map(); this.unmatched = []; this.summary = {}; this.status = {};
+    this.strokes = new Map(); this.unmatched = []; this.summary = {}; this.status = {}; this.splits = new Map();
     this.fc = { 0x003d: new ForceCurve(), 0x0043: new ForceCurve() };
     this.maxCount = 0; this.lastStrokeT = null; this.endAt = null; this.newPieceAt = null;
     this.emit = emit || (() => {});
@@ -123,6 +139,19 @@ export class Session {
         piece_type: p.piece_type, piece_length: p.piece_length });
     } else if (short === 0x0033) {
       Object.assign(this.status, { avg_power_w: p.avg_power_w, calories_total: p.calories_total });
+    } else if (short === 0x0037 || short === 0x0038) {
+      if (this.newPieceAt === null && p.split_number) {
+        const sp = this.splits.get(p.split_number) || { split_number: p.split_number };
+        const { elapsed_s, ...rest } = p;
+        Object.assign(sp, rest, { end_s: elapsed_s });
+        this.splits.set(p.split_number, sp);
+        this.emit("split", sp);
+      }
+      return;
+    } else if (short === 0x003b) {
+      Object.assign(this.status, p);
+    } else if (short === 0x003e) {
+      Object.assign(this.status, { battery_pct: p.battery_pct, screen: p.screen, last_error: p.last_error, op_state: p.op_state });
     } else if (short === 0x003a) {
       Object.assign(this.summary, p);
       this.emit("summary", this.summary);
@@ -178,9 +207,10 @@ export class Session {
   }
 
   sortedStrokes() { return [...this.strokes.keys()].sort((a, b) => a - b).map(k => this.strokes.get(k)); }
-  snapshot() { return { status: this.status, summary: this.summary, strokes: this.sortedStrokes() }; }
+  snapshot() { return { status: this.status, summary: this.summary, strokes: this.sortedStrokes(), splits: [...this.splits.values()].sort((a, b) => a.split_number - b.split_number) }; }
   result(meta) {
     return { ...meta, last_status: this.status, summary: this.summary, strokes: this.sortedStrokes(),
+      splits: [...this.splits.keys()].sort((a, b) => a - b).map(k => this.splits.get(k)),
       unmatched_curves: this.unmatched, new_piece_started: this.newPieceAt !== null };
   }
 }

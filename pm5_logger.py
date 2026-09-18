@@ -110,6 +110,20 @@ def parse(short: int, b: bytes) -> dict | None:
         if short == 0x003A and len(b) >= 12:
             return {"split_type": b[4], "split_size": u16(b, 5), "split_count": b[7],
                     "calories_total": u16(b, 8), "avg_watts": u16(b, 10)}
+        if short == 0x0037 and len(b) >= 18:     # a split or interval just finished (spec rev 0.36)
+            return {"elapsed_s": u24(b, 0) / 100, "distance_m": u24(b, 3) / 10, "split_time_s": u24(b, 6) / 10,
+                    "split_distance_m": u24(b, 9), "rest_time_s": u16(b, 12), "rest_distance_m": u16(b, 14),
+                    "split_type": b[16], "split_number": b[17]}
+        if short == 0x0038 and len(b) >= 19:     # the same split's averages
+            return {"elapsed_s": u24(b, 0) / 100, "split_spm": b[3], "split_hr": None if b[4] in (0, 255) else b[4],
+                    "split_rest_hr": None if b[5] in (0, 255) else b[5], "split_pace_s": u16(b, 6) / 10,
+                    "split_calories": u16(b, 8), "split_cal_per_hr": u16(b, 10), "split_speed_ms": u16(b, 12) / 1000,
+                    "split_power_w": u16(b, 14), "split_drag": b[16], "split_number": b[17], "machine_type": b[18]}
+        if short == 0x003B and len(b) >= 6:      # the heart-rate monitor the PM5 is paired with
+            return {"hrm_mfg": b[0], "hrm_type": b[1], "hrm_id": b[2] | b[3] << 8 | b[4] << 16 | b[5] << 24}
+        if short == 0x003E and len(b) >= 13:     # "additional status 3": state, screen, error, battery
+            return {"op_state": b[0], "verification": b[1], "screen": u16(b, 2), "last_error": u16(b, 4),
+                    "game_id": b[9], "game_score": u16(b, 10), "battery_pct": b[12]}
         if short == 0x0039 and len(b) >= 20:
             return {"elapsed_s": u24(b, 4) / 100, "distance_m": u24(b, 7) / 10,
                     "avg_stroke_rate": b[10], "ending_hr": b[11], "avg_hr": b[12],
@@ -162,7 +176,7 @@ class Session:
     CURVES = {0x003D: "force_curve", 0x0043: "force_curve_v2"}
 
     def __init__(self, echo=False, emit=None):
-        self.strokes, self.unmatched, self.summary, self.status = {}, [], {}, {}
+        self.strokes, self.unmatched, self.summary, self.status, self.splits = {}, [], {}, {}, {}
         self.fc = {k: ForceCurve() for k in self.CURVES}
         self.max_count, self.last_stroke_t, self.end_at, self.new_piece_at = 0, None, None, None
         self.echo, self.emit = echo, emit or (lambda kind, data: None)
@@ -194,6 +208,16 @@ class Session:
                                distance_m=p["distance_m"], piece_type=p["piece_type"], piece_length=p["piece_length"])
         elif short == 0x0033:
             self.status.update(avg_power_w=p["avg_power_w"], calories_total=p["calories_total"])
+        elif short in (0x0037, 0x0038):
+            if self.new_piece_at is None and p["split_number"]:
+                sp = self.splits.setdefault(p["split_number"], {"split_number": p["split_number"]})
+                sp.update({k: v for k, v in p.items() if k != "elapsed_s"}, end_s=p["elapsed_s"])
+                self.emit("split", sp)
+            return
+        elif short == 0x003B:
+            self.status.update(p)
+        elif short == 0x003E:
+            self.status.update(battery_pct=p["battery_pct"], screen=p["screen"], last_error=p["last_error"], op_state=p["op_state"])
         elif short == 0x003A:
             self.summary.update(p)
             self.emit("summary", self.summary)
@@ -252,11 +276,13 @@ class Session:
 
     def snapshot(self) -> dict:
         return {"status": self.status, "summary": self.summary,
-                "strokes": [self.strokes[k] for k in sorted(self.strokes)]}
+                "strokes": [self.strokes[k] for k in sorted(self.strokes)],
+                "splits": [self.splits[k] for k in sorted(self.splits)]}
 
     def result(self, meta: dict) -> dict:
         return {**meta, "last_status": self.status, "summary": self.summary,
                 "strokes": [self.strokes[k] for k in sorted(self.strokes)],
+                "splits": [self.splits[k] for k in sorted(self.splits)],
                 "unmatched_curves": self.unmatched,
                 "new_piece_started": self.new_piece_at is not None}
 
