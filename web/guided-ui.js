@@ -12,8 +12,8 @@ const store = {
 };
 
 export class GuidedUI {
-  constructor({ $, H, S, render, metrics, DB, isConnected, onResult }) {
-    Object.assign(this, { $, H, S, render, metrics, DB, isConnected, onResult });
+  constructor({ $, H, S, render, metrics, DB, isConnected, onResult, onRunning = () => {} }) {
+    Object.assign(this, { $, H, S, render, metrics, DB, isConnected, onResult, onRunning });
     this.engine = null; this.timer = null; this.sim = null; this.pendingN = null; this.norms = []; this.cues = [];
     const q = new URLSearchParams(location.search);
     this.simSpeed = q.has("sim") ? Math.max(1, Number(q.get("sim")) || 20) : null;
@@ -84,6 +84,7 @@ export class GuidedUI {
     } catch (e) { $("g_out").textContent = `Can't build that session: ${e.message}`; return; }
     this.save();
     this.engine = new G.Engine(protocol); this.pendingN = null; this.norms = []; this.cues = [];
+    this.onRunning(true);
     $("g_start").disabled = true; $("g_sim").disabled = true; $("g_stop").hidden = false; $("g_live").hidden = false; $("g_out").textContent = "";
     if (simulate) {
       this.sim = new SimRower({ seed: Date.now() % 100000 }); this.realStart = Date.now() / 1000; this.simStart = this.realStart;
@@ -156,9 +157,11 @@ export class GuidedUI {
     this.reset();
   }
 
+  get running() { return !!this.engine; }
+
   reset() {
     const $ = this.$;
-    this.engine = null; this.sim = null; this.recent = []; this.last = null;
+    this.engine = null; this.onRunning(false); this.sim = null; this.recent = []; this.last = null;
     $("g_start").disabled = false; $("g_sim").disabled = false; $("g_stop").hidden = true; $("g_live").hidden = true;
   }
 

@@ -28,7 +28,7 @@ The Concept2 Logbook keeps the time, distance, pace, stroke rate and heart rate 
 
 ## Use it in the browser, nothing to install
 
-The same logger runs as a web page in Chrome or Edge, which can talk to Bluetooth devices directly (Safari and Firefox can't). Open the page, press **Connect to PM5**, pick the monitor from the list and row. The dashboard, the workout set-up bar and the fitness report are all there, and each finished row is kept in the browser, from where you can download the same session JSON and raw log the Python version writes. Nothing leaves your computer. The Concept2 Logbook upload is not in the browser version yet; ErgData can still sync the row from the PM5's own memory afterwards.
+The same logger runs as a web page in Chrome or Edge, which can talk to Bluetooth devices directly (Safari and Firefox can't). Open the page, press **Connect to PM5**, pick the monitor from the list and row. The dashboard, the workout set-up bar and the fitness report are all there, and each finished row is kept in the browser, from where you can download the same session JSON and raw log the Python version writes. Nothing leaves your computer. While the PM5 is connected, or a guided session is running, the page asks the browser to keep the screen on, so it doesn't dim or lock mid-row; a note by the status line says so. The browser lets go whenever the page is out of view, and takes it back when you return to it. The Concept2 Logbook upload is not in the browser version yet; ErgData can still sync the row from the PM5's own memory afterwards.
 
 The page is published from the `web/` folder by GitHub Actions, so it lives at the repository's GitHub Pages address once Pages is switched on. To run it yourself, serve the folder over HTTP (Web Bluetooth needs `http://localhost` or `https://`):
 
@@ -74,7 +74,7 @@ You need a PM5 with Bluetooth, a computer with Bluetooth LE and Python 3.10 or n
 
 1. Close ErgData and any other app that connects to your rower. The PM5 talks to one app at a time and stops advertising while anything is connected. If there is a Bluetooth symbol on the PM5's screen, something is still connected.
 2. Wake the PM5 by pressing a button.
-3. Run `python pm5_logger.py`. It finds the PM5, connects to it and opens the dashboard.
+3. Run `python pm5_logger.py`. It finds the PM5, connects to it and opens the dashboard. On a Mac, `caffeinate -d python pm5_logger.py` also keeps the screen from dimming or locking while it runs.
 4. Row, then end the piece on the monitor with the Menu button. The PM5 sends its end-of-workout summary only when the piece is ended on the monitor.
 5. The logger stops 75 seconds later, when the PM5 sends the summary again with your recovery heart rate. It also stops 10 minutes after the last stroke, or when you press Ctrl+C. Every way of stopping saves the session.
 

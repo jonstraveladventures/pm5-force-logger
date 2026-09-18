@@ -8,6 +8,7 @@ import * as DB from "./store.js";
 import { H, render, S, metrics } from "./dashboard.js";
 import * as G from "./guided.js";
 import { GuidedUI } from "./guided-ui.js";
+import * as Wake from "./wake.js";
 
 const $ = id => document.getElementById(id);
 const state = { pm: null, session: null, raw: [], meta: {}, endTimer: null, sample: false, named: {}, lastSaved: null };
@@ -90,6 +91,7 @@ async function connect() {
   $("intro").hidden = true; $("stop").hidden = false; $("wo_send").disabled = !state.pm.control; $("wo_clear").disabled = !state.pm.control;
   state.meta.workout = undefined;
   startSession();
+  updateWake();
   setConn(`live: ${state.pm.info.name}${state.pm.info.firmware_rev ? ", firmware " + state.pm.info.firmware_rev : ""}. Row when ready; end the piece on the PM5 (Menu)`, "live");
 }
 
@@ -97,6 +99,7 @@ async function onDisconnected() {
   if (state.session && state.session.strokes.size) await finish("the PM5 disconnected");
   else setConn("the PM5 disconnected");
   state.pm = null;
+  updateWake();
   $("connect").disabled = false; $("stop").hidden = true; $("wo_send").disabled = true; $("wo_clear").disabled = true;
 }
 
@@ -234,7 +237,14 @@ $("sessions_list").addEventListener("click", async e => {
 });
 
 // ---------- guided sessions ----------
+// ---------- keep the screen on while connected or in a guided session ----------
+const WAKE_TEXT = { on: "screen kept awake", paused: "", off: "", refused: "the browser won't keep the screen awake" };
+Wake.onStatus(st => { $("wake").textContent = WAKE_TEXT[st] ?? ""; });
+let guidedRunning = false;
+function updateWake() { Wake.keepAwake(!!(state.pm && state.pm.connected) || guidedRunning); }
+
 const guided = new GuidedUI({ $, H, S, render, metrics, DB, isConnected: () => !!(state.pm && state.pm.connected),
+  onRunning: running => { guidedRunning = running; updateWake(); },
   onResult: async result => {   // the report goes into the row's session file
     if (state.session && state.session.strokes.size) { state.meta.guided = result; return; }
     if (!state.lastSaved) return;
