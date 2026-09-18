@@ -315,7 +315,7 @@ function onResized(el) {
 /** Sizes dragged in an earlier visit. */
 function applySizes() {
   const { size = {} } = loadLayout();
-  for (const [id, s] of Object.entries(size)) { const el = $(id); if (!el) continue; if (s.w) el.style.width = s.w; if (s.h) el.style.height = s.h; }
+  for (const [id, s] of Object.entries(size)) { const el = $(id); if (!el) continue; if (s.w) el.style.width = s.w; if (s.h) el.style.minHeight = s.h; }
 }
 
 function applyArrange() {
@@ -338,6 +338,7 @@ function applyArrange() {
       const el = e.target.closest && e.target.closest(".arranging");
       const canvas = el && el.querySelector("canvas");
       if (canvas) el._chrome = el.getBoundingClientRect().height - canvas.getBoundingClientRect().height;
+      if (el && el.style.minHeight) { el.style.height = el.getBoundingClientRect().height + "px"; el.style.minHeight = ""; }
     }, true);
     document.addEventListener("pointerup", () => {
       for (const el of document.querySelectorAll(".arranging")) {
@@ -353,6 +354,7 @@ function applyArrange() {
           if (h) { el.style.height = ""; l.size[el.id].h = null; }
           saveLayout(l);
         }
+        if (el.style.height) { el.style.minHeight = el.style.height; el.style.height = ""; }
       }
     });
   }
