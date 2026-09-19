@@ -112,6 +112,7 @@
       <h2>Force curve</h2>
       <div class="row">
         <label>Curve <select id="src"><option value="force_curve_v2">force v handle travel (0x0043)</option><option value="force_curve">force v time (0x003D)</option></select></label>
+        <label title="Savitzky-Golay over 5 points: takes out point-to-point ripple and false dips, keeps real dips. The measures are computed on what is shown.">Smoothing <select id="smooth"><option value="0">raw</option><option value="5">light (5 points)</option></select></label>
         <label>Compare to <select id="refsel"><option value="kleshnev">Kleshnev shape (front-loaded)</option><option value="rp3">RP3 shape (rounded, peak 45%)</option><option value="mine">my saved reference</option></select></label>
         <button id="saveref" title="Store this session's average curve as your personal reference">Save average as my reference</button>
       </div>
@@ -207,6 +208,14 @@ function parabolaR2(r) { // least-squares y = a x^2 + b x + c on x in [0, 1]; R^
   for (let i = 0; i < n; i++) { const x = i / (n - 1), f = a * x * x + b * x + c; ssr += (r[i] - f) ** 2; sst += (r[i] - mean) ** 2; }
   return sst ? Math.max(0, 1 - ssr / sst) : 0;
 }
+// Savitzky-Golay smoothing over 5 points: see web/curve.js for what it does and how it was tested
+const SG5 = [-3, 12, 17, 12, -3].map(c => c / 35);
+function savgol(p) {
+  if (!p || p.length < 5) return p;
+  const n = p.length, at = i => (i < 0 ? 2 * p[0] - p[-i] : i >= n ? 2 * p[n - 1] - p[2 * (n - 1) - i] : p[i]);
+  return p.map((_, i) => { let v = 0; for (let k = -2; k <= 2; k++) v += SG5[k + 2] * at(i + k); return Math.max(0, v); });
+}
+function smoothed(raw, on) { if (!on || !raw) return raw; const t = trim(raw); return t ? savgol(t) : raw; }
 function rmsePct(a, b) { if (!a || !b) return null; let s = 0; for (let i = 0; i < a.length; i++) s += (a[i] - b[i]) ** 2; return 100 * Math.sqrt(s / a.length); }
 function meanCurve(list) { const c = list.filter(Boolean); if (!c.length) return null; const m = c[0].map((_, i) => c.reduce((s, x) => s + x[i], 0) / c.length); const mx = Math.max(...m); return m.map(v => v / mx); }
 
@@ -248,14 +257,16 @@ function setupCanvas(c) { const dpr = window.devicePixelRatio || 1, w = c.client
 const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 const canvasFont = () => `${Math.round(11 * (parseFloat(css("--text")) || 1))}px -apple-system, sans-serif`;
 const src = () => document.getElementById("src").value;
+// the curve as analysed: raw, or smoothed if the Smoothing choice says so
+const pts = s => smoothed(s[src()], document.getElementById("smooth") && document.getElementById("smooth").value === "5");
 const refKey = () => document.getElementById("refsel").value;
 const KLESHNEV = fromControl(KLESHNEV_PTS);
 function reference() { if (refKey() === "mine") { try { return JSON.parse(localStorage.getItem("pm5_my_reference")); } catch { return null; } } return refKey() === "rp3" ? RP3_SHAPE : KLESHNEV; }
 const school = () => SCHOOLS[document.getElementById("school").value] || TARGETS;
 const bands = () => BANDS[document.getElementById("bands").value] || null;
-function rememberChoices() { try { localStorage.setItem("pm5_choices", JSON.stringify({ ref: refKey(), school: document.getElementById("school").value, bands: document.getElementById("bands").value })); } catch {} }
-(function restoreChoices() { try { const c = JSON.parse(localStorage.getItem("pm5_choices")) || {}; for (const [id, k] of [["refsel", "ref"], ["school", "school"], ["bands", "bands"]]) if (c[k]) document.getElementById(id).value = c[k]; } catch {} })();
-const strokesWithCurves = () => [...S.strokes.values()].filter(s => trim(s[src()])).sort((a, b) => a.stroke_count - b.stroke_count);
+function rememberChoices() { try { localStorage.setItem("pm5_choices", JSON.stringify({ ref: refKey(), school: document.getElementById("school").value, bands: document.getElementById("bands").value, smooth: document.getElementById("smooth").value })); } catch {} }
+(function restoreChoices() { try { const c = JSON.parse(localStorage.getItem("pm5_choices")) || {}; for (const [id, k] of [["refsel", "ref"], ["school", "school"], ["bands", "bands"], ["smooth", "smooth"]]) if (c[k]) document.getElementById(id).value = c[k]; } catch {} })();
+const strokesWithCurves = () => [...S.strokes.values()].filter(s => trim(pts(s))).sort((a, b) => a.stroke_count - b.stroke_count);
 const lastStroke = () => { const all = [...S.strokes.values()]; return all.length ? all.reduce((a, b) => b.stroke_count > a.stroke_count ? b : a) : null; };
 
 let hoverX = null;
@@ -264,28 +275,28 @@ function drawCurve() {
   const pad = { l: 44, r: 16, t: 10, b: 44 }, pw = w - pad.l - pad.r, ph = h - pad.t - pad.b;
   const list = strokesWithCurves(); const cur = list[list.length - 1];
   const recent = list.slice(-9, -1);
-  const series = list.map(s => metrics(s[src()])).filter(Boolean);
+  const series = list.map(s => metrics(pts(s))).filter(Boolean);
   const avg = meanCurve(series.map(m => m.norm));
-  const ymax = Math.max(40, ...list.slice(-9).map(s => Math.max(...trim(s[src()])))) * 1.1;
+  const ymax = Math.max(40, ...list.slice(-9).map(s => Math.max(...trim(pts(s))))) * 1.1;
   // grid + axes
   g.strokeStyle = css("--grid"); g.lineWidth = 1; g.fillStyle = css("--ink3"); g.font = canvasFont();
   for (let f = 0; f <= ymax; f += ymax > 150 ? 50 : 25) { const y = pad.t + ph - f / ymax * ph; g.beginPath(); g.moveTo(pad.l, y); g.lineTo(w - pad.r, y); g.stroke(); g.fillText(`${f}`, 8, y + 4); }
   g.textAlign = "center";
-  const lenCm = src() === "force_curve_v2" && cur ? handleCm(cur[src()]) : null;
+  const lenCm = src() === "force_curve_v2" && cur ? handleCm(pts(cur)) : null;
   for (let p = 0; p <= 100; p += 20) g.fillText(lenCm ? `${Math.round(p / 100 * lenCm)}` : `${p}%`, pad.l + p / 100 * pw, pad.t + ph + 16);
   g.fillText(lenCm ? "handle travel from first force, cm (this stroke)" : "drive time, from first force to release (normalised)", pad.l + pw / 2, h - 6);
   g.save(); g.translate(12, pad.t + ph / 2); g.rotate(-Math.PI / 2); g.fillText("force (lbf)", 0, 0); g.restore();
   g.textAlign = "left";
   const X = i => pad.l + i / 100 * pw, Y = f => pad.t + ph - f / ymax * ph;
   const line = (arr, color, width, dash = [], scale = 1) => { if (!arr) return; g.setLineDash(dash); g.strokeStyle = color; g.lineWidth = width; g.beginPath(); arr.forEach((v, i) => i ? g.lineTo(X(i), Y(v * scale)) : g.moveTo(X(i), Y(v * scale))); g.stroke(); g.setLineDash([]); };
-  recent.forEach(s => line(resample(trim(s[src()])), "rgba(57,135,229,.28)", 1.5));
-  const curM = cur ? metrics(cur[src()]) : null; const scale = curM ? curM.fmax : (series.length ? series[series.length - 1].fmax : 1);
+  recent.forEach(s => line(resample(trim(pts(s))), "rgba(57,135,229,.28)", 1.5));
+  const curM = cur ? metrics(pts(cur)) : null; const scale = curM ? curM.fmax : (series.length ? series[series.length - 1].fmax : 1);
   line(reference(), css("--s2"), 2, [6, 5], scale);            // shapes scaled to this stroke's peak, so shape is what differs
   line(avg, css("--s3"), 2, [], scale);
-  if (cur) line(resample(trim(cur[src()])), css("--s1"), 3);
+  if (cur) line(resample(trim(pts(cur))), css("--s1"), 3);
   if (curM) { g.fillStyle = css("--s1"); g.beginPath(); g.arc(X(curM.a100), Y(curM.fmax), 4, 0, 7); g.fill(); }
   if (hoverX != null && cur) { const i = Math.round(Math.max(0, Math.min(100, (hoverX - pad.l) / pw * 100))); g.strokeStyle = css("--ink3"); g.beginPath(); g.moveTo(X(i), pad.t); g.lineTo(X(i), pad.t + ph); g.stroke();
-    const r = resample(trim(cur[src()])); const ref = reference();
+    const r = resample(trim(pts(cur))); const ref = reference();
     document.getElementById("hover").textContent = `${i}% of drive${lenCm ? ` (${Math.round(i / 100 * lenCm)} cm)` : ""} · this stroke ${n0(r[i])} lbf · average ${avg ? n0(avg[i] * scale) : "—"} · reference ${ref ? n0(ref[i] * scale) : "—"}`; }
   else document.getElementById("hover").textContent = cur ? `stroke ${cur.stroke_count}: hover the chart to read values` : "waiting for the first stroke…";
 }
@@ -295,14 +306,14 @@ document.getElementById("curve").addEventListener("mouseleave", () => { hoverX =
 function renderMetrics() {
   const list = strokesWithCurves(); const cur = list[list.length - 1]; const el = document.getElementById("metrics");
   if (!cur) { el.innerHTML = `<div class="note">Force-curve metrics appear after the first stroke.</div>`; return; }
-  const m = metrics(cur[src()]); const series = list.map(s => metrics(s[src()])).filter(Boolean); const avg = meanCurve(series.map(x => x.norm));
+  const m = metrics(pts(cur)); const series = list.map(s => metrics(pts(s))).filter(Boolean); const avg = meanCurve(series.map(x => x.norm));
   const ref = reference(), T = school(), B = bands(); const inRange = (v, t) => v >= t.lo && v <= t.hi;
   const flag = (v, t, lowWord, highWord) => !t ? "" : inRange(v, t) ? `<span class="flag ok">✓ in range</span>` : `<span class="flag off">▲ ${v > t.hi ? highWord : lowWord}</span>`;
   const label = t => t ? t.label : "no target in this school";
   const peakN = cur.peak_force_lbf ? cur.peak_force_lbf * 4.448 : null, mass = massKg();
   const bandRow = (name, value, unit, key, note) => B && value != null ? [[name, `${unit === "m" ? n2(value) : n0(value)} ${unit}`, `RP3 ${document.getElementById("bands").value}: ${bandText(B[key])}`, `<span class="flag">${bandOf(value, B[key])}</span>`, note]] : [];
   const rows = [
-    ["Peak position", src() === "force_curve_v2" ? `${m.a100}% · ${Math.round(m.a100 / 100 * handleCm(cur[src()]))} cm` : `${m.a100}%`, label(T.a100), flag(m.a100, T.a100, "early", "late"), "Where in the drive force peaks. Kleshnev's crews peak early (legs); RP3's rounded stroke peaks just before the oar is square, around 43–48%. Later than 55% points to the back taking over from the legs."],
+    ["Peak position", src() === "force_curve_v2" ? `${m.a100}% · ${Math.round(m.a100 / 100 * handleCm(pts(cur)))} cm` : `${m.a100}%`, label(T.a100), flag(m.a100, T.a100, "early", "late"), "Where in the drive force peaks. Kleshnev's crews peak early (legs); RP3's rounded stroke peaks just before the oar is square, around 43–48%. Later than 55% points to the back taking over from the legs."],
     ["Catch gradient", `${m.a70}%`, label(T.a70), flag(m.a70, T.a70, "", "slow"), "How far into the drive before force reaches 70% of peak: how quickly the legs load."],
     ["Finish plateau", `${m.d70}%`, label(T.d70), flag(m.d70, T.d70, "short", "long"), "How long force stays above 70% of peak after the peak: the back and arms carrying it on."],
     ["Rectangle index", `${n0(m.ram)}%`, label(T.ram), flag(m.ram, T.ram, "peaky", "flat"), "Average force as a share of peak. Higher is a fuller curve; a parabola scores 67%."],
@@ -323,8 +334,8 @@ function renderMetrics() {
 
 const TRENDS = [
   ["Peak force (lbf)", s => s.peak_force_lbf, null],
-  ["Peak position (% of drive)", s => metrics(s[src()])?.a100, () => school().a100],
-  ["Rectangle index (%)", s => metrics(s[src()])?.ram, () => school().ram],
+  ["Peak position (% of drive)", s => metrics(pts(s))?.a100, () => school().a100],
+  ["Rectangle index (%)", s => metrics(pts(s))?.ram, () => school().ram],
   ["Drive length (m)", s => s.drive_length_m, null],
   ["Power (W)", s => s.power_w, null],
 ];
@@ -359,7 +370,7 @@ function renderSplits() {
 
 function renderTable() {
   const list = [...S.strokes.values()].sort((a, b) => b.stroke_count - a.stroke_count).slice(0, uiValue("rows"));
-  document.querySelector("#table tbody").innerHTML = list.map(s => { const m = metrics(s[src()]); const ratio = s.recovery_time_s && s.drive_time_s ? `1:${n1(s.recovery_time_s / s.drive_time_s)}` : "—";
+  document.querySelector("#table tbody").innerHTML = list.map(s => { const m = metrics(pts(s)); const ratio = s.recovery_time_s && s.drive_time_s ? `1:${n1(s.recovery_time_s / s.drive_time_s)}` : "—";
     return `<tr><td>${s.stroke_count}</td><td>${n2(s.drive_length_m)}</td><td>${n2(s.drive_time_s)}</td><td>${n2(s.recovery_time_s)}</td><td>${ratio}</td><td>${n2(s.stroke_distance_m)}</td><td>${n0(s.peak_force_lbf)}</td><td>${n0(s.avg_force_lbf)}</td><td>${n0(s.work_j)}</td><td>${n0(s.power_w)}</td><td>${m ? m.a100 + "%" : "—"}</td><td>${m ? n0(m.ram) + "%" : "—"}</td><td>${s.hr ? s.hr : "—"}</td></tr>`; }).join("");
 }
 
@@ -557,10 +568,11 @@ document.getElementById("src").addEventListener("change", render);
 document.getElementById("refsel").addEventListener("change", () => { rememberChoices(); render(); });
 document.getElementById("school").addEventListener("change", () => { rememberChoices(); render(); });
 document.getElementById("bands").addEventListener("change", () => { rememberChoices(); render(); });
+document.getElementById("smooth").addEventListener("change", () => { rememberChoices(); render(); });
 document.getElementById("mass").value = massKg() ?? "";
 document.getElementById("mass").addEventListener("change", () => { setMassKg(parseFloat(document.getElementById("mass").value)); if (document.getElementById("fit_mass")) document.getElementById("fit_mass").value = document.getElementById("mass").value; render(); });
 document.getElementById("saveref").addEventListener("click", () => {
-  const series = strokesWithCurves().map(s => metrics(s[src()])).filter(Boolean); const avg = meanCurve(series.map(m => m.norm));
+  const series = strokesWithCurves().map(s => metrics(pts(s))).filter(Boolean); const avg = meanCurve(series.map(m => m.norm));
   if (!avg) { alert("No force curves yet in this session."); return; }
   localStorage.setItem("pm5_my_reference", JSON.stringify(avg)); document.getElementById("refsel").value = "mine";
   document.getElementById("banner").textContent = `saved the average of ${series.length} strokes as your reference`; render();

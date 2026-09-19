@@ -197,6 +197,7 @@
       <h2>Force curve</h2>
       <div class="row">
         <label>Curve <select id="src"><option value="force_curve_v2">force v handle travel (0x0043)</option><option value="force_curve">force v time (0x003D)</option></select></label>
+        <label title="Savitzky-Golay over 5 points: takes out point-to-point ripple and false dips, keeps real dips. The measures are computed on what is shown.">Smoothing <select id="smooth"><option value="0">raw</option><option value="5">light (5 points)</option></select></label>
         <label>Compare to <select id="refsel"><option value="kleshnev">Kleshnev shape (front-loaded)</option><option value="rp3">RP3 shape (rounded, peak 45%)</option><option value="mine">my saved reference</option></select></label>
         <button id="saveref" title="Store this session's average curve as your personal reference">Save average as my reference</button>
       </div>
