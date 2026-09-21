@@ -26,6 +26,16 @@ async def http(port, method, path, body=None):
     return status, payload
 
 
+async def raw(port, request: bytes):
+    """Send a request written out by hand, for the headers the helper above cannot produce."""
+    r, w = await asyncio.open_connection("127.0.0.1", port)
+    w.write(request)
+    await w.drain()
+    head = await r.readuntil(b"\r\n\r\n")
+    w.close()
+    return int(head.split()[1])
+
+
 class HubApiTests(unittest.TestCase):
     def test_workouts_and_program(self):
         async def run():
@@ -86,6 +96,38 @@ class HubApiTests(unittest.TestCase):
                 head = await r.readuntil(b"\r\n\r\n")
                 self.assertTrue(head.startswith(b"HTTP/1.1 404"))
                 w.close()
+            finally:
+                server.close()
+                await server.wait_closed()
+        asyncio.run(run())
+
+
+class ContentLengthTests(unittest.TestCase):
+    """A Content-Length the server will not honour is answered, not read. Without this the
+    handler waits in readexactly for a body that is never sent."""
+
+    def test_header_is_read_defensively(self):
+        self.assertEqual(L.content_length(b"Content-Length: 12\r\n"), 12)
+        self.assertEqual(L.content_length(b"content-length:0\r\n"), 0)
+        self.assertEqual(L.content_length(b"Content-Length: %d\r\n" % L.MAX_BODY_BYTES), L.MAX_BODY_BYTES)
+        for bad in (b"Content-Length: %d\r\n" % (L.MAX_BODY_BYTES + 1), b"Content-Length: -5\r\n",
+                    b"Content-Length: 99999999999\r\n", b"Content-Length: twelve\r\n",
+                    b"Content-Length:\r\n", b"Content-Length"):
+            self.assertIsNone(L.content_length(bad), bad)
+
+    def test_the_server_answers_rather_than_waits(self):
+        async def run():
+            hub = L.Hub()
+            server = await asyncio.start_server(hub.handle, "127.0.0.1", 0)
+            port = server.sockets[0].getsockname()[1]
+            try:
+                for header in (b"Content-Length: 99999999999", b"Content-Length: -5", b"Content-Length: twelve"):
+                    request = b"POST /program HTTP/1.1\r\nHost: x\r\n" + header + b"\r\n\r\n"
+                    status = await asyncio.wait_for(raw(port, request), 2)
+                    self.assertEqual(status, 400, header)
+                # a body within the limit still goes through
+                s, body = await http(port, "POST", "/program", {"spec": "4x4"})
+                self.assertEqual(s, 503)                      # no PM5, which means the body was read
             finally:
                 server.close()
                 await server.wait_closed()

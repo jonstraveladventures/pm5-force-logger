@@ -59,6 +59,7 @@ DEVICE_INFO = {0x0011: "model", 0x0012: "serial", 0x0013: "hardware_rev",
 IDLE_STOP_S = 600          # stop 10 min after the last stroke (the PM5 sends status every second while awake)
 AFTER_END_S = 75           # the PM5 re-sends its summary with recovery HR after 1 min of rest
 CURVE_MATCH_S = 3.0        # a force curve belongs to the stroke record within this many seconds
+MAX_BODY_BYTES = 64 * 1024  # the dashboard's own POST is a few dozen bytes; nothing larger is read
 
 WORKOUT_STATE = {0: "wait_to_begin", 1: "workout_row", 2: "countdown_pause", 3: "interval_rest",
                  4: "interval_work_time", 5: "interval_work_distance",
@@ -287,6 +288,18 @@ class Session:
                 "new_piece_started": self.new_piece_at is not None}
 
 
+def content_length(header: bytes):
+    """How many bytes a Content-Length header asks for, or None if it asks for something this
+    server will not read: not a number, negative, or bigger than MAX_BODY_BYTES. The port listens
+    on 127.0.0.1 only, so this is not a defence against the internet; it stops a local process
+    (or a confused tab) leaving the handler waiting in readexactly for bytes that never come."""
+    try:
+        n = int(header.split(b":", 1)[1])
+    except (IndexError, ValueError):
+        return None
+    return n if 0 <= n <= MAX_BODY_BYTES else None
+
+
 class Hub:
     """Fan-out of dashboard events to every open browser tab (server-sent events), plus the
     small JSON API the dashboard uses to program the PM5: GET /workouts lists the named pieces,
@@ -337,7 +350,11 @@ class Hub:
             length = 0
             while (line := await reader.readline()) not in (b"\r\n", b"\n", b""):
                 if line.lower().startswith(b"content-length:"):
-                    length = int(line.split(b":", 1)[1])
+                    length = content_length(line)
+            if length is None:
+                self._json(writer, 400, {"error": f"the body must be at most {MAX_BODY_BYTES} bytes"})
+                await writer.drain()
+                return
             body = await reader.readexactly(length) if length else b""
             if path.startswith("/events"):
                 writer.write(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n"
