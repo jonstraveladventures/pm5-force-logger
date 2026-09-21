@@ -1,6 +1,10 @@
 // The force-curve maths, shared by the dashboard and the tests: trimming, resampling to 101
 // points, the shape measures, the parabola fit, and optional Savitzky-Golay smoothing.
 
+// Concept2 sends one force-curve point per 3.5/3 of an inch of handle travel on the distance
+// channel (0x0043), which is 2.96 cm (Ryan Farrell, Concept2, September 2026).
+export const CM_PER_POINT = 3.5 / 3 * 2.54;
+
 export function trim(p) { if (!p || p.length < 3) return null; let a = 0, b = p.length - 1; while (a < b && p[a] <= 0) a++; while (b > a && p[b] <= 0) b--; return b - a >= 2 ? p.slice(a, b + 1) : null; }
 export function resample(p, n = 101) { const m = p.length; return Array.from({ length: n }, (_, i) => { const x = i * (m - 1) / (n - 1), j = Math.floor(x), f = x - j; return j + 1 < m ? p[j] * (1 - f) + p[j + 1] * f : p[m - 1]; }); }
 

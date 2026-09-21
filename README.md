@@ -24,6 +24,8 @@ The Concept2 Logbook keeps the time, distance, pace, stroke rate and heart rate 
 
 **Every stroke saved to disk**, as a raw log of every Bluetooth message and a session file with one record per stroke, including both force curves.
 
+**A row you can take elsewhere.** Any saved row exports as a Garmin FIT activity, carrying the per-stroke rowing detail in the developer fields of the emerging [Rowing Data Standard](https://github.com/MoveLab-Studio/rowing-data-standard), so Garmin Connect, intervals.icu, Strava or Rowsandall will take it.
+
 **Optional extras.** The page can set up the workout on the PM5, and run a guided session (see below). Given your mass and maximum heart rate, each row reports the watts you hold at a set heart rate and an estimate of VO2max. Each row can also go to your Concept2 Logbook, which matters because ErgData cannot connect while this script holds the PM5's Bluetooth connection, so nothing else would send it.
 
 ## Use it in the browser, nothing to install
@@ -129,6 +131,31 @@ Everything is saved in `data/` (change it with `--out`), which `.gitignore` keep
 
 Forces are in pounds of force (lbf), which is how the PM5 reports them.
 
+## Sending a row somewhere else (FIT)
+
+Every saved row in the browser has a **FIT** button beside it. What comes out is an ordinary
+Garmin FIT activity, so Garmin Connect, intervals.icu, Strava and Rowsandall read it as an indoor
+row: time, distance, pace, stroke rate, heart rate, power, calories, and one lap for each split
+the PM5 reported.
+
+The per-stroke detail travels in FIT developer fields under the application UUID of the
+[Rowing Data Standard](https://github.com/MoveLab-Studio/rowing-data-standard), the shared
+convention Concept2, RP3, CrewNerd, Rowsandall and OpenRowingMonitor are working towards. Anything
+that ignores it still gets the activity; anything that knows it also gets, for every stroke, the
+drive length, the drive and recovery times, the drag factor, the average and peak force in
+newtons, the work, the stroke rate to a hundredth of a stroke per minute, and how far into the
+handle's travel the force peaked.
+
+That standard is a working draft and its field numbers may change before it is ratified. The
+in-stroke curve fields have no agreed numbering at all yet, so the curves themselves stay in the
+session JSON for now.
+
+For a row recorded with the Python logger, the same encoder runs from the command line:
+
+```bash
+node web/tools/tofit.mjs data/sessions/2026-09-18_171111.json
+```
+
 ## Reading the force curve
 
 There is no single perfect curve, and coaches disagree about the details, though they agree on the basics. Concept2 describes a good curve as one smooth hump and says that the usual fault is a dip at the handover from the legs to the back. Valery Kleshnev's measurements of elite rowers give targets for four measures of the curve's shape. The dashboard scores each stroke against them:
@@ -197,7 +224,7 @@ So far this has been tested on one PM5, running firmware 178.069. Other PM5 vers
 python -m unittest discover -s tests -v
 ```
 
-The tests build packets by hand from the specification's byte layouts, check the force-curve reassembly and the merging of the two stroke-data copies, and run the synthetic sample through the same parser the logger uses live. They need no Bluetooth or network, and run on every push through GitHub Actions. The browser version has its own tests (`node --test web/tests/`) against fixtures written by `web/tests/make_fixtures.py` from the Python code, so the two implementations are checked against each other; re-run that script after changing the Python side.
+The tests build packets by hand from the specification's byte layouts, check the force-curve reassembly and the merging of the two stroke-data copies, and run the synthetic sample through the same parser the logger uses live. They need no Bluetooth or network, and run on every push through GitHub Actions. The browser version has its own tests (`node --test web/tests/`) against fixtures written by `web/tests/make_fixtures.py` from the Python code, so the two implementations are checked against each other; re-run that script after changing the Python side. The FIT files are read back in the Node tests by a reader written from the file format rather than from the writer; `web/tests/verify_fit.py` puts them through Garmin's own SDK and fitdecode as well, which needs `pip install garmin-fit-sdk fitdecode`.
 
 ## How this was built
 
@@ -208,6 +235,7 @@ Jonathan Shock built this with Claude, Anthropic's AI model, working in Claude C
 - Concept2, [PM Bluetooth Smart Communication Interface Definition](https://www.concept2.co.in/files/pdf/us/monitors/PM5_BluetoothSmartInterfaceDefinition.pdf), revision 1.30
 - Concept2, PM CSAFE Communication Definition, revision 0.36 (August 2026), sent by Concept2 in September 2026; it documents the force-against-distance channel `0x0043`, the status characteristic `0x003E`, the split characteristics and the heart-rate monitor commands used here. An earlier revision is [published here](http://www.concept2.co.in/files/pdf/us/monitors/PM5_CSAFECommunicationDefinition.pdf).
 - Concept2, [Logbook API documentation](https://log.concept2.com/developers/documentation/)
+- [Rowing Data Standard](https://github.com/MoveLab-Studio/rowing-data-standard), draft v0.1 (August 2026), originally written by Sander Roosendaal: the FIT developer fields this project writes. Nothing in it is ratified yet.
 - Concept2, [Improving your rows with the force curve](https://www.concept2.com/blog/improving-your-rows-with-the-force-curve)
 - V. Kleshnev (2011), *Biomechanics of Rowing*; the targets as summarised by [biomex.studio](https://biomex.studio/rowing/)
 - RP3 Rowing, [Training with RP3 for Dummies](https://rp3rowing.com/wp-content/uploads/2025/09/Training-with-RP3-for-Dummies-v1.2-English.pdf), v1.2 (2025), and S. Broenink and S. Bon, [How coaches could use the RP3 indoor rower to improve rowers](https://rp3rowing.com/wp-content/uploads/2025/09/White-Paper-Improve-the-ForceCurve-ENG-1.3-4.pdf), v1.3 (2023). Their peak-position band, stroke-quality score and guideline bands are restated here with attribution; the documents themselves are RP3's.

@@ -9,6 +9,7 @@ import { H, render, S, metrics } from "./dashboard.js";
 import * as G from "./guided.js";
 import { GuidedUI } from "./guided-ui.js";
 import * as Wake from "./wake.js";
+import * as Fit from "./fit.js";
 
 const $ = id => document.getElementById(id);
 const state = { pm: null, session: null, raw: [], meta: {}, endTimer: null, sample: false, named: {}, lastSaved: null };
@@ -242,7 +243,7 @@ async function refreshSessions() {
     const sm = s.summary || {}, last = s.strokes[s.strokes.length - 1] || {};
     const dist = sm.distance_m ?? last.distance_m, time = sm.elapsed_s ?? last.elapsed_s;
     return `<tr><td>${s.started}</td><td>${dist != null ? Math.round(dist) + " m" : "—"}</td><td>${time != null ? fmt(time) : "—"}</td><td>${s.strokes.length}</td>
-      <td><button data-act="view" data-id="${s.started}">view</button><button data-act="json" data-id="${s.started}">session JSON</button><button data-act="raw" data-id="${s.started}">raw log</button><button data-act="del" data-id="${s.started}">delete</button></td></tr>`;
+      <td><button data-act="view" data-id="${s.started}">view</button><button data-act="json" data-id="${s.started}">session JSON</button><button data-act="fit" data-id="${s.started}">FIT</button><button data-act="raw" data-id="${s.started}">raw log</button><button data-act="del" data-id="${s.started}">delete</button></td></tr>`;
   });
   $("sessions_list").innerHTML = `<table><thead><tr><th>Started</th><th>Distance</th><th>Time</th><th>Strokes</th><th></th></tr></thead><tbody>${rows.join("")}</tbody></table>`;
 }
@@ -260,6 +261,9 @@ $("sessions_list").addEventListener("click", async e => {
     showFitness([[id, s]]);
   } else if (act === "json") {
     DB.download(`${id}.json`, JSON.stringify(await DB.getSession(id), null, 1));
+  } else if (act === "fit") {
+    const s = await DB.getSession(id);
+    DB.download(Fit.fileName(s), Fit.encode(s), "application/vnd.ant.fit");
   } else if (act === "raw") {
     const r = await DB.getRaw(id);
     DB.download(`${id}.jsonl`, (r ? r.lines : []).map(l => JSON.stringify(l)).join("\n") + "\n", "application/x-ndjson");

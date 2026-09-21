@@ -1,12 +1,11 @@
 // The live dashboard: tiles, the force curve with its shape measures, trends and the stroke
 // table. The same code as pm5_dashboard.html (served by the Python logger), fed here by the
 // page itself through H (the event handlers) instead of server-sent events.
-import { trim, resample, metrics, smoothed } from "./curve.js";
+import { trim, resample, metrics, smoothed, CM_PER_POINT } from "./curve.js";
 export { trim, resample, metrics };
 export const S = { strokes: new Map(), status: {}, summary: {}, device: {}, splits: new Map() };
 // Characteristic 0x0043 is force against handle travel: each reading is 3.5/3 inches of the handle
 // moving away from the flywheel (Concept2, for RowErg models B to D). 0x003D is force against time.
-const CM_PER_POINT = 3.5 / 3 * 2.54;
 const handleCm = pts => { const t = trim(pts); return t ? t.length * CM_PER_POINT : null; };
 const $ = id => document.getElementById(id);
 
