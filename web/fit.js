@@ -166,6 +166,11 @@ export function encode(sess) {
   const drag = sm.drag_factor_avg ?? (sess.last_status || {}).drag_factor ?? null;
   const work = strokes.reduce((a, s) => a + (s.work_j || 0), 0);
   const maxPower = strokes.reduce((a, s) => Math.max(a, s.power_w || 0), 0) || null;
+  // The PM5's end-of-workout summary reports average, minimum and maximum heart rate as zero
+  // (seen on every row so far), so they come from the strokes instead when it does.
+  const hrs = strokes.map(s => s.hr).filter(h => h);
+  const avgHr = sm.avg_hr || (hrs.length ? hrs.reduce((a, b) => a + b, 0) / hrs.length : null);
+  const maxHr = sm.max_hr || (hrs.length ? Math.max(...hrs) : null);
   const maxSpeed = strokes.reduce((a, s) => Math.max(a, speed(s) || 0), 0) || null;
   const endT = t0 + totalS;
 
@@ -240,7 +245,8 @@ export function encode(sess) {
       if (!recDefined) { messages(buf, 6, MESG.record, recFields, recDev, mine); recDefined = true; }
       else for (const row of mine) { buf.u8(6); for (const f of recFields) writeValue(buf, f, row[f.key]); for (const d of recDev) writeValue(buf, d, row[d.key]); }
     }
-    const hrs = mine.map(r => r.hr).filter(h => h), powers = mine.map(r => r.power).filter(p => p);
+    const lapHrs = mine.map(r => r.hr).filter(h => h), powers = mine.map(r => r.power).filter(p => p);
+    const lapAvgHr = lap.hr ?? (lapHrs.length ? lapHrs.reduce((a, b) => a + b, 0) / lapHrs.length : null);
     const tail2 = last(mine) || {};
     const lapCycles = (tail2.cycles ?? cyclesBefore) - cyclesBefore;
     const dur = lap.end_s - lap.start_s;
@@ -248,8 +254,10 @@ export function encode(sess) {
       start_time: stamp(t0 + lap.start_s), total_elapsed_time: dur, total_timer_time: dur,
       total_distance: lap.distance_m, total_cycles: lapCycles || null, total_calories: lap.calories ?? (lapList.length === 1 ? sm.calories_total : null),
       avg_speed: lap.speed_ms ?? (dur > 0 && lap.distance_m ? lap.distance_m / dur : null),
-      avg_heart_rate: lap.hr ?? (hrs.length ? hrs.reduce((a, b) => a + b, 0) / hrs.length : null),
-      max_heart_rate: hrs.length ? Math.max(...hrs) : null,
+      avg_heart_rate: lapAvgHr,
+      // the monitor averages the split over every second while we sample once a stroke, so its
+      // average can sit above the highest beat we saw; the maximum is at least the average
+      max_heart_rate: lapHrs.length || lapAvgHr ? Math.max(...lapHrs, lapAvgHr || 0) : null,
       avg_cadence: lap.spm ?? (mine.length ? mine.reduce((a, r) => a + (r.StrokeRate || 0), 0) / mine.length : null),
       avg_power: lap.power_w ?? (powers.length ? powers.reduce((a, b) => a + b, 0) / powers.length : null),
       max_power: powers.length ? Math.max(...powers) : null,
@@ -275,7 +283,7 @@ export function encode(sess) {
       sport: SPORT_ROWING, sub_sport: SUB_INDOOR_ROWING, total_elapsed_time: totalS, total_timer_time: totalS,
       total_distance: totalM, total_cycles: cycles, total_calories: sm.calories_total,
       avg_speed: totalS > 0 ? totalM / totalS : null, max_speed: maxSpeed,
-      avg_heart_rate: sm.avg_hr || null, max_heart_rate: sm.max_hr || null,
+      avg_heart_rate: avgHr, max_heart_rate: maxHr,
       avg_cadence: sm.avg_stroke_rate || null, avg_power: sm.avg_watts || null, max_power: maxPower,
       first_lap_index: 0, num_laps: lapList.length, trigger: 0,
       avg_stroke_distance: cycles ? totalM / cycles : null, total_work: work || null,

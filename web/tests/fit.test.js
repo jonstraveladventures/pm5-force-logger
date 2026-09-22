@@ -167,6 +167,28 @@ test("nonsense readings are left out rather than written", () => {
   assert.equal(of(bare, 20)[0].dev[DEV_FIELDS.DriveLength.num], Math.round(sample.strokes[0].drive_length_m * 1000));
 });
 
+test("heart rate survives the summary the PM5 actually sends", () => {
+  // it reports average, minimum and maximum as zero, so they have to come from the strokes
+  const summary = { ...sample.summary, avg_hr: 0, max_hr: 0, min_hr: 0 };
+  const msgs = read(encode({ ...sample, summary }));
+  const hrs = sample.strokes.map(s => s.hr).filter(h => h);
+  const session = of(msgs, 18)[0];
+  assert.equal(session.f[16], Math.round(hrs.reduce((a, b) => a + b, 0) / hrs.length));
+  assert.equal(session.f[17], Math.max(...hrs));
+  // and the monitor's own numbers win when it sends them
+  assert.equal(of(read(encode(sample)), 18)[0].f[16], sample.summary.avg_hr);
+});
+
+test("a lap's highest heart rate is never below its average", () => {
+  // the monitor averages a split over every second; we sample once a stroke, so its average can
+  // sit above every beat we saw, and a maximum below the average is not a readable lap
+  const splits = [{ split_number: 1, split_time_s: 200, split_distance_m: 700, end_s: 200, split_hr: 200 }];
+  const lap = of(read(encode({ ...sample, splits })), 19)[0];
+  assert.equal(lap.f[15], 200);
+  assert.equal(lap.f[16], 200);
+  for (const l of of(read(encode({ ...sample, splits: [] })), 19)) assert.ok(l.f[16] >= l.f[15]);
+});
+
 test("a row with no strokes still writes a valid, empty activity", () => {
   const msgs = read(encode({ started: "2026-09-20_100000", strokes: [], summary: {} }));
   assert.equal(of(msgs, 20).length, 0);
