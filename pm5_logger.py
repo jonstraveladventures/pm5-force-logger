@@ -45,6 +45,7 @@ import time
 import webbrowser
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parent
 DASHBOARD = ROOT / "pm5_dashboard.html"
@@ -60,6 +61,7 @@ IDLE_STOP_S = 600          # stop 10 min after the last stroke (the PM5 sends st
 AFTER_END_S = 75           # the PM5 re-sends its summary with recovery HR after 1 min of rest
 CURVE_MATCH_S = 3.0        # a force curve belongs to the stroke record within this many seconds
 MAX_BODY_BYTES = 64 * 1024  # the dashboard's own POST is a few dozen bytes; nothing larger is read
+LOCAL_NAMES = {"localhost", "127.0.0.1", "::1"}   # what Host and Origin may name
 
 WORKOUT_STATE = {0: "wait_to_begin", 1: "workout_row", 2: "countdown_pause", 3: "interval_rest",
                  4: "interval_work_time", 5: "interval_work_distance",
@@ -300,6 +302,26 @@ def content_length(header: bytes):
     return n if 0 <= n <= MAX_BODY_BYTES else None
 
 
+def from_this_machine(host: bytes | None, origin: bytes | None) -> bool:
+    """Whether a request came from a page on this machine. The server listens on 127.0.0.1, but
+    a web page in the browser can still send it a request: a plain-text POST to /program needs no
+    permission from the server first, so without this check a page elsewhere could stop or change
+    the workout on the PM5. It could not read the reply, but the PM5 would act on it. Recent Chrome
+    already refuses to let public sites reach localhost (tested September 2026); this check does
+    not depend on the browser, and also covers pages served on other local ports. The Host header
+    shuts out DNS rebinding, where an outside name is pointed at 127.0.0.1 so that its pages count
+    as same-origin and could read /events, heart rate included. A missing Origin is fine (the
+    dashboard's own page loads, curl); a missing Host is not."""
+    def name(value, url):
+        try:
+            return urlsplit(value.decode().strip() if url else "//" + value.decode().strip()).hostname
+        except (UnicodeDecodeError, ValueError):
+            return None
+    if host is None or name(host, False) not in LOCAL_NAMES:
+        return False
+    return origin is None or name(origin, True) in LOCAL_NAMES
+
+
 class Hub:
     """Fan-out of dashboard events to every open browser tab (server-sent events), plus the
     small JSON API the dashboard uses to program the PM5: GET /workouts lists the named pieces,
@@ -317,7 +339,7 @@ class Hub:
 
     def _json(self, writer, status: int, payload: dict):
         body = json.dumps(payload).encode()
-        reason = {200: "OK", 400: "Bad Request", 404: "Not Found", 502: "Bad Gateway", 503: "Service Unavailable"}
+        reason = {200: "OK", 400: "Bad Request", 403: "Forbidden", 404: "Not Found", 502: "Bad Gateway", 503: "Service Unavailable"}
         writer.write(f"HTTP/1.1 {status} {reason.get(status, 'OK')}\r\nContent-Type: application/json\r\n"
                      f"Cache-Control: no-cache\r\nContent-Length: {len(body)}\r\n\r\n".encode() + body)
 
@@ -347,10 +369,19 @@ class Hub:
             request = (await reader.readline()).split()
             method = request[0].decode() if request else "GET"
             path = request[1].decode() if len(request) > 1 else "/"
-            length = 0
+            length, host, origin = 0, None, None
             while (line := await reader.readline()) not in (b"\r\n", b"\n", b""):
-                if line.lower().startswith(b"content-length:"):
+                key = line.split(b":", 1)[0].strip().lower()
+                if key == b"content-length":
                     length = content_length(line)
+                elif key == b"host":
+                    host = line.split(b":", 1)[1]
+                elif key == b"origin":
+                    origin = line.split(b":", 1)[1]
+            if not from_this_machine(host, origin):
+                self._json(writer, 403, {"error": "this server only answers pages on this machine"})
+                await writer.drain()
+                return
             if length is None:
                 self._json(writer, 400, {"error": f"the body must be at most {MAX_BODY_BYTES} bytes"})
                 await writer.drain()

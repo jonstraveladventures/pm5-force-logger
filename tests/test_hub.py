@@ -16,7 +16,7 @@ import pm5_logger as L    # noqa: E402
 async def http(port, method, path, body=None):
     r, w = await asyncio.open_connection("127.0.0.1", port)
     data = json.dumps(body).encode() if body is not None else b""
-    w.write(f"{method} {path} HTTP/1.1\r\nHost: x\r\nContent-Length: {len(data)}\r\n\r\n".encode() + data)
+    w.write(f"{method} {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: {len(data)}\r\n\r\n".encode() + data)
     await w.drain()
     head = await r.readuntil(b"\r\n\r\n")
     status = int(head.split()[1])
@@ -85,13 +85,13 @@ class HubApiTests(unittest.TestCase):
             port = server.sockets[0].getsockname()[1]
             try:
                 r, w = await asyncio.open_connection("127.0.0.1", port)
-                w.write(b"GET / HTTP/1.1\r\nHost: x\r\n\r\n")
+                w.write(b"GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
                 await w.drain()
                 head = await r.readuntil(b"\r\n\r\n")
                 self.assertTrue(head.startswith(b"HTTP/1.1 200"))
                 w.close()
                 r, w = await asyncio.open_connection("127.0.0.1", port)
-                w.write(b"GET /nothing HTTP/1.1\r\nHost: x\r\n\r\n")
+                w.write(b"GET /nothing HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
                 await w.drain()
                 head = await r.readuntil(b"\r\n\r\n")
                 self.assertTrue(head.startswith(b"HTTP/1.1 404"))
@@ -122,12 +122,61 @@ class ContentLengthTests(unittest.TestCase):
             port = server.sockets[0].getsockname()[1]
             try:
                 for header in (b"Content-Length: 99999999999", b"Content-Length: -5", b"Content-Length: twelve"):
-                    request = b"POST /program HTTP/1.1\r\nHost: x\r\n" + header + b"\r\n\r\n"
+                    request = b"POST /program HTTP/1.1\r\nHost: 127.0.0.1\r\n" + header + b"\r\n\r\n"
                     status = await asyncio.wait_for(raw(port, request), 2)
                     self.assertEqual(status, 400, header)
                 # a body within the limit still goes through
                 s, body = await http(port, "POST", "/program", {"spec": "4x4"})
                 self.assertEqual(s, 503)                      # no PM5, which means the body was read
+            finally:
+                server.close()
+                await server.wait_closed()
+        asyncio.run(run())
+
+
+class OriginTests(unittest.TestCase):
+    """Only pages on this machine may use the API. Any website open in the browser can send a
+    plain-text POST to localhost without asking first; without this check it could stop or
+    change the workout on the PM5."""
+
+    def test_which_requests_count_as_local(self):
+        ok = L.from_this_machine
+        self.assertTrue(ok(b" 127.0.0.1:8750\r\n", None))
+        self.assertTrue(ok(b" localhost:8750\r\n", b" http://localhost:8750\r\n"))
+        self.assertTrue(ok(b" [::1]:8750\r\n", b" http://127.0.0.1:8750\r\n"))
+        self.assertTrue(ok(b" LOCALHOST:8750\r\n", None), "host names are not case-sensitive")
+        self.assertFalse(ok(None, None), "HTTP/1.1 requires a Host")
+        self.assertFalse(ok(b" evil.example:8750\r\n", None), "DNS rebinding: an outside name pointed at us")
+        self.assertFalse(ok(b" localhost.evil.example\r\n", None))
+        self.assertFalse(ok(b" 127.0.0.1:8750\r\n", b" https://evil.example\r\n"), "a page on another site")
+        self.assertFalse(ok(b" 127.0.0.1:8750\r\n", b" null\r\n"), "a sandboxed frame or a file")
+        self.assertFalse(ok(b" 127.0.0.1:8750\r\n", b" http://localhost.evil.example\r\n"))
+
+    def test_a_foreign_page_cannot_stop_the_workout(self):
+        async def run():
+            hub = L.Hub()
+            calls = []
+
+            async def fake(spec):
+                calls.append(spec)
+                return "done"
+            hub.programmer = fake
+            server = await asyncio.start_server(hub.handle, "127.0.0.1", 0)
+            port = server.sockets[0].getsockname()[1]
+            try:
+                body = b'{"terminate": true}'
+                # what another site's page sends: text/plain, so the browser does not ask first
+                attack = (b"POST /program HTTP/1.1\r\nHost: 127.0.0.1:%d\r\nOrigin: https://evil.example\r\n"
+                          b"Content-Type: text/plain\r\nContent-Length: %d\r\n\r\n" % (port, len(body)) + body)
+                self.assertEqual(await asyncio.wait_for(raw(port, attack), 2), 403)
+                rebound = (b"GET /events HTTP/1.1\r\nHost: evil.example:%d\r\n\r\n" % port)
+                self.assertEqual(await asyncio.wait_for(raw(port, rebound), 2), 403)
+                self.assertEqual(calls, [], "the PM5 was never told anything")
+                # the dashboard's own request still works
+                own = (b"POST /program HTTP/1.1\r\nHost: localhost:%d\r\nOrigin: http://localhost:%d\r\n"
+                       b"Content-Type: application/json\r\nContent-Length: %d\r\n\r\n" % (port, port, len(body)) + body)
+                self.assertEqual(await asyncio.wait_for(raw(port, own), 2), 200)
+                self.assertEqual(calls, [None])
             finally:
                 server.close()
                 await server.wait_closed()
