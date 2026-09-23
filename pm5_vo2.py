@@ -210,6 +210,8 @@ def report(sessions: list, cfg: dict) -> str:
             elif stages:
                 lines.append(f"   too few stages for a line of its own ({POOL_MIN_ROWS} spanning {POOL_MIN_SPREAD_W} W); "
                              f"they still count in the fit across rows")
+            if stages and ((sess.get("guided") or {}).get("step") or {}).get("balanced") is not True:
+                lines.append("   only the way up was rowed, so heart-rate drift steepens the line and reads fitness low")
             points += stages
             n_tests += bool(stages)
             n_stages += len(stages)

@@ -117,19 +117,26 @@ export function driftTest({ watts = 140, total_s = 2100, warm_s = 300 } = {}) {
       recovery()] };
 }
 
-/** Stages of rising power; heart rate at the end of each gives the heart-rate-against-power line. */
-export function stepTest({ start_w = 110, step_w = 20, stages = 4, total_s = 1260, warm_s = 300, stage_s = null, count_s = 90 } = {}) {
+/** Stages of power up and back down again (110, 140, 170, 170, 140, 110 W). Heart rate at the end
+ *  of each gives the heart-rate-against-power line. Heart rate drifts upwards through a row even
+ *  at a steady power; going only upwards puts that drift on the later, harder stages and makes the
+ *  line too steep, which reads fitness low (8% low at 0.4 bpm a minute in the simulator). Up and
+ *  down, every power's two visits sit either side of the middle of the test, so a steady drift
+ *  adds the same to each and the slope is left alone, as in the rate test. */
+export function stepTest({ start_w = 110, step_w = 30, stages = 3, total_s = 1500, warm_s = 300, stage_s = null, count_s = null } = {}) {
+  const powers = Array.from({ length: stages }, (_, i) => start_w + i * step_w);
+  const order = [...powers, ...[...powers].reverse()];
   let warnings = [];
-  if (stage_s == null) { const f = share(total_s, warm_s, stages, { warnBelow: 180, failBelow: 120, what: "stages" }); stage_s = f.block; warnings = f.warnings; warm_s += f.spare; }
-  count_s = Math.min(count_s, stage_s - 30);
+  if (stage_s == null) { const f = share(total_s, warm_s, order.length, { warnBelow: 180, failBelow: 120, what: "stages" }); stage_s = f.block; warnings = f.warnings; warm_s += f.spare; }
+  count_s = count_s ?? Math.max(60, Math.min(120, stage_s - SETTLE_S));
   const blocks = [warmup(warm_s, { watts: start_w })];
-  for (let i = 0; i < stages; i++) {
-    const w = start_w + i * step_w;
+  order.forEach((w, i) => {
+    const top = i === stages;   // the top power again: say so, and that the way down comes next
     blocks.push({ label: `Stage ${i + 1}, ${w} W`, short: `stage ${i + 1}, ${w} watts`, role: "test", key: w, watts: w, s: stage_s, count_s,
-      cue: `Stage ${i + 1}: ${w} watts, pace ${fmtPace(paceFromWatts(w))}, for ${minutesWords(stage_s)}.` });
-  }
+      cue: `Stage ${i + 1} of ${order.length}: ${top ? "stay at " : ""}${w} watts, pace ${fmtPace(paceFromWatts(w))}, for ${minutesWords(stage_s)}${top ? ", then back down the same steps" : ""}.` });
+  });
   blocks.push(recovery());
-  return { kind: "step", title: `Step test from ${start_w} W`, params: { start_w, step_w, stages, stage_s, count_s, total_s: warm_s + stages * stage_s }, warnings, blocks };
+  return { kind: "step", title: `Step test from ${start_w} W`, params: { start_w, step_w, stages, stage_s, count_s, total_s: warm_s + order.length * stage_s }, warnings, blocks };
 }
 
 export function readinessCheck({ watts = 120 } = {}) {
@@ -378,9 +385,18 @@ export function analyse(eng, ctx = {}) {
     out.drift = { first: h1, second: h2, decoupling_pct: h1 && h2 ? 100 * (ef(h1) - ef(h2)) / ef(h1) : null };
   }
   if (k === "step") {
-    const stages = eng.blocks.filter(b => b.role === "test" && reached(eng, b)).map(b => { const [f, t] = windowOf(b), st = stats(eng.strokes, f, t); return st ? { key: b.key, ...st } : null; }).filter(Boolean);
-    const line = V.fitLine(stages.map(s => ({ watts: s.watts, hr: s.hr })));
-    out.step = { stages, line, estimate: line && ctx.cfg ? V.pooled(stages.map(s => ({ watts: s.watts, hr: s.hr })), ctx.cfg) : null };
+    const tests = eng.blocks.filter(b => b.role === "test");
+    const stages = tests.filter(b => reached(eng, b)).map(b => { const [f, t] = windowOf(b), st = stats(eng.strokes, f, t); return st ? { key: b.key, ...st } : null; }).filter(Boolean);
+    // balanced: every power was rowed on the way up and again on the way down, so drift cancels
+    const planned = new Map(), done = new Map();
+    for (const b of tests) planned.set(b.key, (planned.get(b.key) || 0) + 1);
+    for (const st of stages) done.set(st.key, [...(done.get(st.key) || []), st]);
+    const balanced = tests.length > 0 && [...planned].every(([key, n]) => (done.get(key) || []).length === n);
+    const pairs = [...done.values()].filter(v => v.length === 2);
+    const drift = pairs.length ? mean(pairs.map(([a, b]) => (b.hr - a.hr) / (((b.from + b.to) - (a.from + a.to)) / 120))) : null;
+    const pts = stages.map(s => ({ watts: s.watts, hr: s.hr }));
+    const line = V.fitLine(pts);
+    out.step = { stages, balanced, drift_bpm_min: drift, line, estimate: line && ctx.cfg ? V.pooled(pts, ctx.cfg) : null };
   }
   if (k === "drill") out.drill = drillOf(eng);
   out.readiness = readinessOf(eng, { ...ctx, hr_rest: rest });
@@ -425,6 +441,8 @@ export function report(r) {
   if (r.step) {
     for (const s of r.step.stages) L.push(`  stage at ${s.key} W: ${r0(s.watts)} W, ${r1(s.hr)} bpm`);
     if (r.step.line) L.push(`Heart rate = ${r0(r.step.line.a)} + ${r.step.line.b.toFixed(2)} x watts.`);
+    if (r.step.drift_bpm_min != null) L.push(`Heart rate drifted about ${r1(r.step.drift_bpm_min)} bpm a minute between each power's two visits; going up and back down cancels a steady drift.`);
+    if (r.step.balanced === false) L.push("The test stopped before every power had been rowed on the way back down, so drift is not cancelled and the line reads your fitness low.");
     const e = r.step.estimate;
     if (e) L.push(`Watts at your zone heart rate: ${r0(e.watts_at_zone)}; VO2max estimate ~${r0(e.vo2max)} ml/kg/min (${r0(e.watts_at_hrmax)} W at maximum heart rate).`);
     else if (r.step.line) L.push("Enter mass and maximum heart rate in the fitness settings for the VO2max estimate.");
@@ -489,8 +507,8 @@ export const PROTOCOLS = {
     fields: [["watts", "watts", 140, "num"], ["total", "total (min)", 35, "num"]],
     about: "Fixed power for a long row. Heart rate per watt in the second half against the first gives the aerobic decoupling." },
   step: { title: "Step test", build: p => stepTest({ start_w: p.start, step_w: p.step, stages: p.stages, total_s: p.total * 60 }),
-    fields: [["start", "first stage (W)", 110, "num"], ["step", "step (W)", 20, "num"], ["stages", "stages", 4, "num"], ["total", "total (min)", 21, "num"]],
-    about: "Stages of rising power, all below zone 3. Heart rate at the end of each gives the heart-rate-against-power line and, with your fitness settings, a VO2max estimate." },
+    fields: [["start", "first stage (W)", 110, "num"], ["step", "step (W)", 30, "num"], ["stages", "powers", 3, "num"], ["total", "total (min)", 25, "num"]],
+    about: "Stages of power up and back down again, all below zone 3. Heart rate at the end of each gives the heart-rate-against-power line and, with your fitness settings, a VO2max estimate. Going back down cancels the upward drift in heart rate that would otherwise read your fitness low." },
   drag: { title: "Drag sweep", build: p => dragSweep({ dampers: p.dampers, pace_s: p.pace, total_s: p.total * 60, warm_s: p.warm * 60 }),
     fields: [["dampers", "damper settings", "3,5,7", "list"], ["pace", "pace", "2:12", "pace"], ["total", "total (min)", 30, "num"], ["warm", "warm-up (min)", 8, "num"]],
     about: "The same palindrome across damper settings. You move the damper when told; the monitor measures the drag factor." },

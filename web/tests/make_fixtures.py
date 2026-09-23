@@ -83,7 +83,7 @@ def row(minutes=20, watts=150, hr=140, spm=16, sprint_last=False, jitter=0.0, se
     return {"strokes": strokes, "summary": {"drag_factor_avg": 118}}
 
 
-def step_row(stages=(110, 130, 150, 170), stage_s=240, warm_s=300, count_s=90, seed=4):
+def step_row(stages=(110, 130, 150, 170), stage_s=240, warm_s=300, count_s=90, seed=4, balanced=None):
     """A step test as the browser saves it: the strokes, and the guided result holding each finished
     stage's mean power and heart rate over its last count_s. Heart rate climbs towards each new
     stage's level rather than jumping, so a steady window across the row would not match."""
@@ -107,7 +107,8 @@ def step_row(stages=(110, 130, 150, 170), stage_s=240, warm_s=300, count_s=90, s
         done.append({"key": w, "watts": sum(x["power_w"] for x in last) / len(last),
                      "hr": sum(x["hr"] for x in last) / len(last), "n": len(last)})
     return {"strokes": strokes, "summary": {"drag_factor_avg": 118},
-            "guided": {"kind": "step", "title": f"Step test from {stages[0]} W", "step": {"stages": done}}}
+            "guided": {"kind": "step", "title": f"Step test from {stages[0]} W",
+                       "step": {"stages": done, **({"balanced": balanced} if balanced is not None else {})}}}
 
 
 def vo2():
@@ -127,7 +128,10 @@ def vo2():
                      "points": V.step_points(step_row()),
                      "report_alone": V.report([("step", step_row())], cfg),
                      "report_short": V.report([("short", step_row(stages=(110, 130)))], cfg),
-                     "report_mixed": V.report(rows[:2] + [("step", step_row())], cfg)},
+                     "report_mixed": V.report(rows[:2] + [("step", step_row())], cfg),
+                     "balanced": step_row(stages=(110, 140, 170, 170, 140, 110), stage_s=200, balanced=True),
+                     "report_balanced": V.report([("up and down", step_row(stages=(110, 140, 170, 170, 140, 110),
+                                                                            stage_s=200, balanced=True))], cfg)},
             "vo2_300w_85kg": V.vo2(300, 85), "watts_at": V.watts_at(148, 150, 146, 42)}
 
 

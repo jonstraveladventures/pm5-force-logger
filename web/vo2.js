@@ -119,6 +119,7 @@ export function report(sessions, cfg) {
       const own = pooled(stages, cfg);
       if (own) lines.push(`   its own line: HR = ${f0(own.a)} + ${own.b.toFixed(2)} x W;  watts at ${f0(cfg.zone_hr)} bpm: ${f0(own.watts_at_zone)};  VO2max ~${f0(own.vo2max)} ml/kg/min`);
       else if (stages.length) lines.push(`   too few stages for a line of its own (${POOL_MIN_ROWS} spanning ${POOL_MIN_SPREAD_W} W); they still count in the fit across rows`);
+      if (stages.length && ((sess.guided || {}).step || {}).balanced !== true) lines.push("   only the way up was rowed, so heart-rate drift steepens the line and reads fitness low");
       points.push(...stages);
       nTests += stages.length ? 1 : 0;
       nStages += stages.length;

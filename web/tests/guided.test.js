@@ -83,7 +83,8 @@ test("too short a session warns, and far too short is refused with the length th
   assert.throws(() => G.rateTest({ total_s: 20 * 60 }), /too short.*at least 26 minutes/);
   assert.throws(() => G.hrCap({ total_s: 8 * 60 }), G.TooShort);
   assert.equal(G.driftTest({ total_s: 20 * 60 }).warnings.length, 1);
-  assert.equal(G.stepTest({ total_s: 21 * 60 }).warnings.length, 0);
+  assert.equal(G.stepTest().warnings.length, 0, "the default 25 minutes gives each of six stages 3:20");
+  assert.equal(G.stepTest({ total_s: 21 * 60 }).warnings.length, 1);
 });
 
 test("the session length comes from the piece on the monitor", () => {
@@ -130,15 +131,48 @@ test("the drift test measures decoupling, and none when the heart rate doesn't d
   assert.ok(Math.abs(none) < 1, `decoupling without drift ${none}`);
 });
 
-test("the step test recovers the heart-rate slope and gives a VO2max estimate", () => {
+test("the step test goes up and back down, so drift doesn't steepen the line", () => {
   const cfg = { mass_kg: 94, hrmax: 195, hr_rest: 42, zone_hr: 148, efficiency: 0.21, notes: [] };
-  const { r, text } = run(G.stepTest(), { drift: 0.4, seed: 11 }, { hr_rest: 42, cfg });
-  assert.equal(r.step.stages.length, 4);
-  // the simulator's slope is 0.55 × (1 + 0.004) plus the drift across a 4-minute, 20-watt step (0.08)
-  assert.ok(r.step.line.b > 0.52 && r.step.line.b < 0.72, `slope ${r.step.line.b}`);
+  const p = G.stepTest();
+  assert.deepEqual(p.blocks.filter(b => b.role === "test").map(b => b.watts), [110, 140, 170, 170, 140, 110]);
+  assert.equal(p.blocks[4].cue, "Stage 4 of 6: stay at 170 watts, pace 2:07, for 3 minutes 20 seconds, then back down the same steps.");
+  // the simulator's true slope is 0.55 x (1 + 0.004 for rowing at 16 rather than 17 strokes a minute)
+  const truth = 0.55 * 1.004;
+  const { r, text } = run(p, { drift: 0.4, seed: 11 }, { hr_rest: 42, cfg });
+  assert.equal(r.step.stages.length, 6);
+  assert.equal(r.step.balanced, true);
+  assert.ok(Math.abs(r.step.line.b - truth) < 0.02, `slope ${r.step.line.b} against ${truth}`);
+  assert.ok(Math.abs(r.step.drift_bpm_min - 0.4) < 0.15, `drift ${r.step.drift_bpm_min}`);
   assert.ok(Number.isFinite(r.step.estimate.vo2max));
   assert.match(text, /VO2max estimate/);
+  assert.match(text, /drifted about 0\.\d bpm a minute/);
+  assert.doesNotMatch(text, /reads your fitness low/);
   noJunk(text);
+
+  // What going back down buys: drift no longer moves the answer. Rowed upwards only, as the step
+  // test used to be, the line steepens with drift (about +0.095 at the 0.95 bpm a minute of a real
+  // 30-minute row on 22 September 2026); up and down it stays put. The small shortfall that
+  // remains, about -0.016 at any drift, is heart rate not quite settling within each stage.
+  const up = { ...p, blocks: [p.blocks[0], ...p.blocks.filter(b => b.role === "test").slice(0, 3), p.blocks[p.blocks.length - 1]] };
+  const slope = (proto, drift) => run(proto, { drift, seed: 11 }, { hr_rest: 42, cfg }).r.step.line.b;
+  const [still, drifting] = [slope(p, 0), slope(p, 0.95)];
+  assert.ok(Math.abs(drifting - still) < 0.01, `up and down: ${still} without drift, ${drifting} with`);
+  assert.ok(slope(up, 0.95) - truth > 0.06, `upwards only: ${slope(up, 0.95)} against ${truth}`);
+});
+
+test("a step test stopped on the way down says its line reads low", () => {
+  const cfg = { mass_kg: 94, hrmax: 195, hr_rest: 42, zone_hr: 148, efficiency: 0.21, notes: [] };
+  const eng = new G.Engine(G.stepTest()), sim = new SimRower({ drift: 0.4, seed: 11 });
+  const stopAt = eng.blocks.filter(b => b.role === "test")[3].end + 30;   // just after the second 170 W stage
+  for (let t = 0; t < stopAt; t += 1) {
+    const target = eng.started ? eng.target(eng.indexAt(t - eng.t0)) : null;
+    for (const rec of sim.advance(t, 1, target)) { eng.begin(rec.t); eng.stroke(simSample(rec)); }
+    eng.tick(t, sim.status());
+  }
+  const r = eng.result({ hr_rest: 42, cfg });
+  assert.equal(r.step.balanced, false);
+  assert.equal(r.step.stages.length, 4);
+  assert.match(G.report(r), /stopped before every power had been rowed on the way back down/);
 });
 
 test("the readiness check adjusts to its power and compares with earlier checks", () => {

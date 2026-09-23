@@ -45,5 +45,8 @@ test("a step test's stages are points of their own, not one steady window", () =
   assert.equal(V.report([["step", st.row]], fx.cfg), st.report_alone);
   assert.equal(V.report([["short", st.short]], fx.cfg), st.report_short);
   assert.equal(V.report([...fx.rows.slice(0, 2), ["step", st.row]], fx.cfg), st.report_mixed);
+  assert.equal(V.report([["up and down", st.balanced]], fx.cfg), st.report_balanced);
+  assert.ok(st.report_alone.includes("only the way up"), "an ascending-only test is flagged");
+  assert.ok(!st.report_balanced.includes("only the way up"), "a balanced one is not");
 });
 
