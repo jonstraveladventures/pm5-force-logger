@@ -138,5 +138,41 @@ class ReportTests(unittest.TestCase):
         self.assertIn("note: HRmax is 220 - age", text)
 
 
+class StepTestTests(unittest.TestCase):
+    """A guided step test holds its own spread in power, so one of them is enough for a fitted
+    line, where steady rows at one power never are."""
+
+    @staticmethod
+    def step(stages):
+        return {"strokes": row(watts=140, hr=130)["strokes"],
+                "guided": {"kind": "step", "step": {"stages": [{"key": w, "watts": w, "hr": hr} for w, hr in stages]}}}
+
+    def test_its_stages_are_the_points_not_its_strokes(self):
+        sess = self.step([(110, 115), (130, 126), (150, 137), (170, 148)])
+        self.assertEqual(V.step_points(sess), [{"watts": 110, "hr": 115}, {"watts": 130, "hr": 126},
+                                               {"watts": 150, "hr": 137}, {"watts": 170, "hr": 148}])
+        # the strokes underneath are an ordinary steady row; they must not be read as one
+        self.assertNotIn("steady", V.report([("step", sess)], CFG))
+        self.assertIsNone(V.step_points(row()))
+        self.assertIsNone(V.step_points({"guided": {"kind": "rate"}}))
+
+    def test_one_step_test_gives_the_line_steady_rows_cannot(self):
+        steady = [(f"r{i}", row(watts=153, hr=147)) for i in range(4)]
+        self.assertIn("no fit across rows yet", V.report(steady, CFG))
+        sess = self.step([(110, 115), (130, 126), (150, 137), (170, 148)])
+        alone = V.report([("step", sess)], CFG)
+        # 11 bpm per 20 W through (110, 115): slope 0.55, and 145 bpm at (145 - 54.5) / 0.55 = 164.5 W
+        self.assertIn("+ 0.55 x W", alone)
+        self.assertIn("watts at 145 bpm: 165", alone)
+        both = V.report(steady + [("step", sess)], CFG)
+        self.assertIn("fit across 4 rows and 4 stages of 1 step test", both)
+
+    def test_an_unfinished_step_test_says_so(self):
+        text = V.report([("s", self.step([(110, 115), (130, 126)]))], CFG)
+        self.assertIn("too few stages for a line of its own", text)
+        self.assertNotIn("no fit across rows yet", text)
+        self.assertIn("no stage finished", V.report([("s", self.step([]))], CFG))
+
+
 if __name__ == "__main__":
     unittest.main()

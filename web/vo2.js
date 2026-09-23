@@ -61,6 +61,15 @@ export function rowPoint(sess) {
 }
 
 /** Oxygen uptake in ml/kg/min at a steady power: rest plus the work above it at the net efficiency. */
+/** A guided step test's stages as points, or null for any other row. Each stage's mean power
+ *  and heart rate over its last minute and a half; a steady window across the whole row would
+ *  average the stages together and throw away the spread in power. Same as pm5_vo2.py. */
+export function stepPoints(sess) {
+  const g = sess.guided || {};
+  if (g.kind !== "step") return null;
+  return ((g.step || {}).stages || []).filter(st => st.watts && st.hr).map(st => ({ watts: st.watts, hr: st.hr }));
+}
+
 export const vo2 = (watts, massKg, efficiency = DEFAULT_EFFICIENCY) => VO2_REST + watts * 60 / (efficiency * O2_KJ_PER_L) / massKg;
 
 /** Power at heart rate hr on the line through (0 W, resting heart rate) and the row's mean. */
@@ -102,7 +111,19 @@ const f0 = x => x.toFixed(0);
 /** Text for a list of [name, session]: a per-row block each, then the pooled fit. Same wording as pm5_vo2.py. */
 export function report(sessions, cfg) {
   const lines = [], points = [];
+  let nRows = 0, nTests = 0, nStages = 0;
   for (const [name, sess] of sessions) {
+    const stages = stepPoints(sess);
+    if (stages !== null) {
+      lines.push(`${name}: step test, ` + (stages.map(p => `${f0(p.watts)} W at ${f0(p.hr)} bpm`).join(", ") || "no stage finished"));
+      const own = pooled(stages, cfg);
+      if (own) lines.push(`   its own line: HR = ${f0(own.a)} + ${own.b.toFixed(2)} x W;  watts at ${f0(cfg.zone_hr)} bpm: ${f0(own.watts_at_zone)};  VO2max ~${f0(own.vo2max)} ml/kg/min`);
+      else if (stages.length) lines.push(`   too few stages for a line of its own (${POOL_MIN_ROWS} spanning ${POOL_MIN_SPREAD_W} W); they still count in the fit across rows`);
+      points.push(...stages);
+      nTests += stages.length ? 1 : 0;
+      nStages += stages.length;
+      continue;
+    }
     const est = estimate(sess, cfg);
     if (est === null) {
       lines.push(`${name}: too short for a steady window (${Math.floor(MIN_WINDOW_S / 60)} min needed after the first ${Math.floor(SKIP_S / 60)}, with heart rate)`);
@@ -114,13 +135,15 @@ export function report(sessions, cfg) {
     lines.push(head);
     if (est.error) { lines.push(`   no estimate: ${est.error}`); continue; }
     points.push(est);
+    nRows++;
     lines.push(`   watts at ${f0(cfg.zone_hr)} bpm: ${f0(est.watts_at_zone)}   VO2max ~${f0(est.vo2max)} ml/kg/min (${f0(est.watts_at_hrmax)} W at HRmax ${f0(cfg.hrmax)}, line through resting ${f0(cfg.hr_rest)})`);
   }
   const fit = pooled(points, cfg);
-  if (fit) {
-    lines.push(`fit across ${fit.rows} rows (${f0(fit.watts_min)}-${f0(fit.watts_max)} W): HR = ${f0(fit.a)} + ${fit.b.toFixed(2)} x W;  watts at ${f0(cfg.zone_hr)} bpm: ${f0(fit.watts_at_zone)};  VO2max ~${f0(fit.vo2max)} ml/kg/min`);
-  } else if (points.length > 1) {
-    lines.push(`no fit across rows yet: it needs ${POOL_MIN_ROWS} or more rows whose steady power spans ${POOL_MIN_SPREAD_W} W`);
+  if (fit && nRows + nTests > 1) {   // one step test alone has already given its own line above
+    const what = [nRows ? `${nRows} rows` : "", nTests ? `${nStages} stages of ${nTests} step test${nTests > 1 ? "s" : ""}` : ""].filter(Boolean).join(" and ");
+    lines.push(`fit across ${what} (${f0(fit.watts_min)}-${f0(fit.watts_max)} W): HR = ${f0(fit.a)} + ${fit.b.toFixed(2)} x W;  watts at ${f0(cfg.zone_hr)} bpm: ${f0(fit.watts_at_zone)};  VO2max ~${f0(fit.vo2max)} ml/kg/min`);
+  } else if (!fit && points.length > 1 && nRows + nTests > 1) {
+    lines.push(`no fit across rows yet: it needs ${POOL_MIN_ROWS} or more rows whose steady power spans ${POOL_MIN_SPREAD_W} W, or a guided step test, which spans that on its own`);
   }
   for (const note of cfg.notes) lines.push(`note: ${note}`);
   return lines.join("\n");

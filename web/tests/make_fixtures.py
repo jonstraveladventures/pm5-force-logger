@@ -83,6 +83,33 @@ def row(minutes=20, watts=150, hr=140, spm=16, sprint_last=False, jitter=0.0, se
     return {"strokes": strokes, "summary": {"drag_factor_avg": 118}}
 
 
+def step_row(stages=(110, 130, 150, 170), stage_s=240, warm_s=300, count_s=90, seed=4):
+    """A step test as the browser saves it: the strokes, and the guided result holding each finished
+    stage's mean power and heart rate over its last count_s. Heart rate climbs towards each new
+    stage's level rather than jumping, so a steady window across the row would not match."""
+    rnd = random.Random(seed)
+    strokes, t, n, hr = [], 0.0, 0, 90.0
+    plan = [(warm_s, stages[0])] + [(stage_s, w) for w in stages]
+    ends = []
+    for dur, w in plan:
+        end = t + dur
+        target = 50 + 0.55 * w
+        while t < end:
+            n += 1
+            hr += (target - hr) * 0.08
+            strokes.append({"elapsed_s": round(t, 2), "power_w": round(w + rnd.uniform(-6, 6)), "hr": round(hr),
+                            "spm": 18, "stroke_count": n})
+            t += 60 / 18
+        ends.append(end)
+    done = []
+    for (dur, w), end in list(zip(plan, ends))[1:]:
+        last = [x for x in strokes if end - count_s <= x["elapsed_s"] <= end]
+        done.append({"key": w, "watts": sum(x["power_w"] for x in last) / len(last),
+                     "hr": sum(x["hr"] for x in last) / len(last), "n": len(last)})
+    return {"strokes": strokes, "summary": {"drag_factor_avg": 118},
+            "guided": {"kind": "step", "title": f"Step test from {stages[0]} W", "step": {"stages": done}}}
+
+
 def vo2():
     cfg = {"mass_kg": 85.0, "hrmax": 190.0, "hr_rest": 50.0, "zone_hr": 145.0, "efficiency": V.DEFAULT_EFFICIENCY, "notes": []}
     rows = [("a", row(watts=120, hr=120, jitter=12, seed=1)), ("b", row(watts=160, hr=140, jitter=15, seed=2, sprint_last=True)),
@@ -96,6 +123,11 @@ def vo2():
             "report": V.report(rows, cfg),
             "report_two": V.report(rows[:2], {**cfg, "notes": ["HRmax is 220 - age"]}),
             "settings": [{"env": env, "expected": V.settings(env)} for env in settings_cases],
+            "step": {"row": step_row(), "short": step_row(stages=(110, 130)),
+                     "points": V.step_points(step_row()),
+                     "report_alone": V.report([("step", step_row())], cfg),
+                     "report_short": V.report([("short", step_row(stages=(110, 130)))], cfg),
+                     "report_mixed": V.report(rows[:2] + [("step", step_row())], cfg)},
             "vo2_300w_85kg": V.vo2(300, 85), "watts_at": V.watts_at(148, 150, 146, 42)}
 
 

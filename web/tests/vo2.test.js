@@ -36,3 +36,14 @@ test("settings: defaults, the age fallback and missing inputs", () => {
   assert.throws(() => V.settings({ PM5_MASS_KG: "eighty", PM5_HRMAX: "190" }), /not a number/);
   assert.throws(() => V.settings({ PM5_MASS_KG: "80", PM5_HRMAX: "150", PM5_HR_REST: "160" }), /below/);
 });
+
+test("a step test's stages are points of their own, not one steady window", () => {
+  const st = fx.step;
+  assert.deepEqual(V.stepPoints(st.row), st.points);
+  assert.equal(V.stepPoints({ strokes: [] }), null, "an ordinary row is not a step test");
+  assert.equal(V.stepPoints({ guided: { kind: "rate" } }), null, "nor is another guided session");
+  assert.equal(V.report([["step", st.row]], fx.cfg), st.report_alone);
+  assert.equal(V.report([["short", st.short]], fx.cfg), st.report_short);
+  assert.equal(V.report([...fx.rows.slice(0, 2), ["step", st.row]], fx.cfg), st.report_mixed);
+});
+

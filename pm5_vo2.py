@@ -132,6 +132,18 @@ def row_point(sess: dict) -> dict | None:
             "drag": (sess.get("summary") or {}).get("drag_factor_avg")}
 
 
+def step_points(sess: dict) -> list | None:
+    """A guided step test's stages as points, or None for any other row. The browser saves each
+    stage's mean power and heart rate over its last minute and a half, once heart rate has caught
+    up with the new power. A steady window across the whole row would average the stages together
+    and throw away the spread in power, which is the reason for doing a step test."""
+    g = sess.get("guided") or {}
+    if g.get("kind") != "step":
+        return None
+    stages = (g.get("step") or {}).get("stages") or []
+    return [{"watts": st["watts"], "hr": st["hr"]} for st in stages if st.get("watts") and st.get("hr")]
+
+
 def vo2(watts: float, mass_kg: float, efficiency: float = DEFAULT_EFFICIENCY) -> float:
     """Oxygen uptake in ml/kg/min at a steady power: rest plus the work above it at the net efficiency."""
     return VO2_REST + watts * 60 / (efficiency * O2_KJ_PER_L) / mass_kg
@@ -185,8 +197,23 @@ def mmss(seconds: float) -> str:
 
 def report(sessions: list, cfg: dict) -> str:
     """Text for a list of (name, session dict): a per-row block each, then the pooled fit."""
-    lines, points = [], []
+    lines, points, n_rows, n_tests, n_stages = [], [], 0, 0, 0
     for name, sess in sessions:
+        stages = step_points(sess)
+        if stages is not None:
+            lines.append(f"{name}: step test, " + (", ".join(f"{p['watts']:.0f} W at {p['hr']:.0f} bpm" for p in stages)
+                                                    or "no stage finished"))
+            own = pooled(stages, cfg)
+            if own:
+                lines.append(f"   its own line: HR = {own['a']:.0f} + {own['b']:.2f} x W;  watts at {cfg['zone_hr']:.0f} bpm: "
+                             f"{own['watts_at_zone']:.0f};  VO2max ~{own['vo2max']:.0f} ml/kg/min")
+            elif stages:
+                lines.append(f"   too few stages for a line of its own ({POOL_MIN_ROWS} spanning {POOL_MIN_SPREAD_W} W); "
+                             f"they still count in the fit across rows")
+            points += stages
+            n_tests += bool(stages)
+            n_stages += len(stages)
+            continue
         est = estimate(sess, cfg)
         if est is None:
             lines.append(f"{name}: too short for a steady window ({MIN_WINDOW_S // 60} min needed after the "
@@ -203,17 +230,20 @@ def report(sessions: list, cfg: dict) -> str:
             lines.append(f"   no estimate: {est['error']}")
             continue
         points.append(est)
+        n_rows += 1
         lines.append(f"   watts at {cfg['zone_hr']:.0f} bpm: {est['watts_at_zone']:.0f}   "
                      f"VO2max ~{est['vo2max']:.0f} ml/kg/min ({est['watts_at_hrmax']:.0f} W at HRmax "
                      f"{cfg['hrmax']:.0f}, line through resting {cfg['hr_rest']:.0f})")
     fit = pooled(points, cfg)
-    if fit:
-        lines.append(f"fit across {fit['rows']} rows ({fit['watts_min']:.0f}-{fit['watts_max']:.0f} W): "
+    if fit and n_rows + n_tests > 1:   # one step test alone has already given its own line above
+        what = " and ".join(x for x in (f"{n_rows} rows" if n_rows else "",
+                                         f"{n_stages} stages of {n_tests} step test{'s' if n_tests > 1 else ''}" if n_tests else "") if x)
+        lines.append(f"fit across {what} ({fit['watts_min']:.0f}-{fit['watts_max']:.0f} W): "
                      f"HR = {fit['a']:.0f} + {fit['b']:.2f} x W;  watts at {cfg['zone_hr']:.0f} bpm: "
                      f"{fit['watts_at_zone']:.0f};  VO2max ~{fit['vo2max']:.0f} ml/kg/min")
-    elif len(points) > 1:
+    elif not fit and len(points) > 1 and n_rows + n_tests > 1:
         lines.append(f"no fit across rows yet: it needs {POOL_MIN_ROWS} or more rows whose steady power spans "
-                     f"{POOL_MIN_SPREAD_W} W")
+                     f"{POOL_MIN_SPREAD_W} W, or a guided step test, which spans that on its own")
     for note in cfg["notes"]:
         lines.append(f"note: {note}")
     return "\n".join(lines)
