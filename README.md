@@ -53,7 +53,7 @@ The voice is recorded in advance: every sentence a session can say, spoken whole
 - **Drift test.** A long row at fixed power. The fall in watts per heartbeat from the first half to the second is the aerobic decoupling; under 5% is the usual sign that the pace is sustainable.
 - **Step test.** Stages of power up and back down again (110, 140, 170, 170, 140, 110 W by default), all easy. Heart rate at the end of each gives the heart-rate-against-power line and, with your fitness settings, a VO2max estimate. Going back down cancels the upward drift in heart rate that would otherwise make the line too steep.
 - **Drag sweep.** The palindrome design across damper settings, to find the drag at which heart rate per watt is lowest, with the same checks before a setting is named. The report gives the drag factor each damper setting produced, since the same setting can give a different drag on another day.
-- **Readiness check.** Five minutes at a fixed easy power. Once there are three earlier checks at that power it compares today with your usual, and afterwards it asks how hard the check felt (0 to 10) and about any soreness or feeling unwell, with room for a note. A reading well above your usual, an effort well above your usual or marked soreness is reported as unusual: a prompt to look at sleep, illness and recent training together, not a verdict. It can replace the warm-up of any other session.
+- **Readiness check** (optional). Five minutes at a fixed easy power. Once there are three earlier checks at that power it compares today with your usual, and afterwards it asks how hard the check felt (0 to 10) and about any soreness or feeling unwell, with room for a note. A reading well above your usual, an effort well above your usual or marked soreness is reported as unusual: a prompt to look at sleep, illness and recent training together, not a verdict. It can replace the warm-up of any other session.
 - **Technique drills.** Drill blocks with easy rowing between: peak position early, a long recovery, or strokes of a consistent shape. Every ten drill strokes you hear how many were on target.
 
 Every session ends with a minute of rest for your recovery heart rate, and every saved row records when peak position started drifting later, if it did. Voice cues use the browser's speech synthesis and can be switched off.
@@ -76,7 +76,7 @@ The browser version has the same sample behind "Try the sample", and "Replay a s
 
 ## Record a session
 
-You need a PM5 with Bluetooth, a computer with Bluetooth LE and Python 3.10 or newer. The original PM5v1 doesn't send force curves over Bluetooth. The project has been tested on macOS, and the Bluetooth library, [bleak](https://github.com/hbldh/bleak), also supports Windows and Linux.
+You need a PM5 with Bluetooth, a computer with Bluetooth LE and Python 3.10 or newer. The project has been tested on macOS, and the Bluetooth library, [bleak](https://github.com/hbldh/bleak), also supports Windows and Linux.
 
 1. Close ErgData and any other app that connects to your rower. The PM5 talks to one app at a time and stops advertising while anything is connected. If there is a Bluetooth symbol on the PM5's screen, something is still connected.
 2. Wake the PM5 by pressing a button.

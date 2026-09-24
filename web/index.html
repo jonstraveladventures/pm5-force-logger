@@ -177,7 +177,7 @@
     <li>Wake the PM5 by pressing a button, then press <b>Connect to PM5</b> and pick it from the list.</li>
     <li>Set up a piece below if you like, row, and end the piece on the monitor (Menu). It is saved here a minute or so after the PM5 reports the end.</li>
   </ol>
-  <p class="note">The original PM5v1 doesn't send force curves over Bluetooth. Heart rate appears only when a belt or watch broadcast is paired with the PM5 itself.</p>
+  <p class="note">Heart rate appears only when a belt or watch broadcast is paired with the PM5 itself.</p>
   <p class="note">This is a hobby project, not coaching or medical advice. The shape targets are guides from published rowing research, the fitness numbers are rough estimates, and rowing hard carries the usual risks, so row within your own limits and talk to a professional about your health. The software is offered as is, under the MIT licence, and its authors accept no liability for its use.</p>
 </div>
 
@@ -195,7 +195,7 @@
     <h2 style="margin:0">Guided session</h2>
     <select id="g_kind"></select>
     <span id="g_params" class="fields"></span>
-    <label><input type="checkbox" id="g_ready"> start with the readiness check</label>
+    <label><input type="checkbox" id="g_ready"> use the warm-up as a readiness check (optional)</label>
     <label><input type="checkbox" id="g_voice" checked> voice</label>
     <button id="g_start" class="primary">Start</button>
     <button id="g_stop" hidden>Stop</button>
@@ -276,12 +276,12 @@
       <button id="fit_progress" title="Each piece you have rowed more than once (the same distance or time set on the monitor), row by row, with its trend">Progress on repeated pieces</button>
     </div>
     <pre id="fit_out"></pre>
-    <div class="note"><span class="hint" tabindex="0">what these numbers mean<span class="tip">From the steady part of a row (after minute five, before the last minute, sprints and pauses dropped), on the line through your resting heart rate; with three or more rows spanning 40 W the line is fitted to your rows instead. The watts at a heart rate near the one you rowed at is the sturdier number; the VO2max is a model estimate: methods like this are usually reported within 10 to 15 per cent of a laboratory measurement, and this one has not been checked against one. These settings stay in this browser.<br><br>This is a hobby project, not coaching or medical advice. The shape targets are guides from published rowing research, the fitness numbers are rough estimates, and rowing hard carries the usual risks, so row within your own limits and talk to a professional about your health. The software is offered as is, under the MIT licence, and its authors accept no liability for its use.</span></span></div>
+    <div class="note"><span class="hint" tabindex="0">what these numbers mean<span class="tip">The watts at a heart rate near the one you rowed at is the number to trust. The VO2max is a model estimate and has not been checked against a laboratory measurement.</span></span></div>
   </div>
   <div class="panel" id="sessions">
     <h2>Saved rows</h2>
     <div id="sessions_list" class="note">none yet</div>
-    <div class="note" style="margin-top:8px">Files match the Python logger's: the session JSON has one record per stroke with both force curves; the raw log has every Bluetooth message and can rebuild the session later.</div>
+    <div class="note" style="margin-top:8px">The session JSON has every stroke with its force curves; the raw log has every Bluetooth message and can rebuild the session later.</div>
     <div class="fields" style="margin-top:8px"><label class="filebtn" title="Session JSON or raw log files saved on a phone, another browser or by the Python logger">Add rows from files<input type="file" id="importfiles" accept=".json,.jsonl,application/json,application/x-ndjson" multiple hidden></label><span id="import_status" class="note"></span></div>
   </div>
 </section>
