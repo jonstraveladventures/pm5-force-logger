@@ -66,7 +66,7 @@ MAX_BODY_BYTES = 64 * 1024  # the dashboard's own POST is a few dozen bytes; not
 HEAD_TIMEOUT_S = 10.0       # a request must arrive, headers and body, within this long
 LOCAL_NAMES = {"localhost", "127.0.0.1", "::1"}   # what Host and Origin may name
 WEB_TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
-             ".json": "application/json", ".png": "image/png"}   # what the page loads from web/
+             ".json": "application/json", ".png": "image/png", ".mp3": "audio/mpeg"}   # what the page loads from web/
 
 WORKOUT_STATE = {0: "wait_to_begin", 1: "workout_row", 2: "countdown_pause", 3: "interval_rest",
                  4: "interval_work_time", 5: "interval_work_distance",
@@ -335,9 +335,11 @@ def from_this_machine(host: bytes | None, origin: bytes | None) -> bool:
 
 def web_file(path: str) -> Path | None:
     """The file in web/ a request path names, or None. Only top-level files of the types the page
-    loads: no subfolders, no dotfiles, so nothing else in the repository is reachable."""
+    loads, and the recorded voice (voice/<name>.mp3 and its manifest): no other subfolder and no
+    dotfiles, so nothing else in the repository is reachable."""
     name = "index.html" if path == "/" else path[1:]
-    if not re.fullmatch(r"\w[\w.-]*", name) or Path(name).suffix not in WEB_TYPES:
+    top = re.fullmatch(r"\w[\w.-]*", name) and Path(name).suffix in WEB_TYPES
+    if not (top or re.fullmatch(r"voice/(?:[a-z0-9-]+\.mp3|manifest\.json)", name)):
         return None
     f = WEB / name
     return f if f.is_file() else None

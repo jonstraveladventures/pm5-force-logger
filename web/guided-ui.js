@@ -5,6 +5,7 @@
 import * as G from "./guided.js";
 import { SimRower } from "./sim.js";
 import * as V from "./vo2.js";
+import { Player, FIXED as SPOKEN } from "./voice.js";
 
 const store = {
   get: (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } },
@@ -15,6 +16,7 @@ export class GuidedUI {
   constructor({ $, H, S, render, metrics, DB, isConnected, onResult, onRunning = () => {} }) {
     Object.assign(this, { $, H, S, render, metrics, DB, isConnected, onResult, onRunning });
     this.engine = null; this.timer = null; this.sim = null; this.pendingN = null; this.norms = []; this.cues = [];
+    this.voice = new Player({ fallback: text => this.speakBrowser(text) });   // recorded sentences, the browser's voice for the rest
     const q = new URLSearchParams(location.search);
     this.simSpeed = q.has("sim") ? Math.max(1, Number(q.get("sim")) || 20) : null;
     this.build();
@@ -113,7 +115,9 @@ export class GuidedUI {
       this.sim = new SimRower({ seed: Date.now() % 100000 }); this.realStart = Date.now() / 1000; this.simStart = this.realStart;
       this.H.reset({ replay: "a simulated rower" }); this.render();
     }
-    this.say(`${protocol.title}. ${simulate ? "" : "Start rowing when you're ready. "}${this.engine.firstCue()}`);
+    if (!simulate && $("g_voice").checked) this.voice.prepare(G.sentencesFor(protocol));   // from the Start click, so audio may begin
+    this.say(`${protocol.title}. ${simulate ? "" : "Start rowing when you're ready. "}${this.engine.firstCue()}`, false,
+      [G.titleSay(protocol.kind), ...(simulate ? [] : [SPOKEN.ready]), ...this.engine.firstSay()]);
     this.lastT = this.now();
     this.timer = setInterval(() => this.tick(), simulate ? Math.max(40, 1000 / this.simSpeed) : 1000);
     this.draw();
@@ -129,7 +133,7 @@ export class GuidedUI {
       status = this.sim.status(); this.H.status(status); this.render();
     }
     this.lastT = t;
-    for (const ev of e.tick(t, status)) this.say(ev.text);
+    for (const ev of e.tick(t, status)) this.say(ev.text, false, ev.say);
     this.draw();
     if (e.done) this.finish(false);
   }
@@ -159,7 +163,7 @@ export class GuidedUI {
     const sample = { t: rec.t, hr: rec.hr, watts: rec.power_w, spm: rec.spm, pace_s: rec.pace_s, peak_lbf: rec.peak_force_lbf,
       a100: m ? m.a100 : null, ratio: rec.recovery_time_s && rec.drive_time_s ? rec.recovery_time_s / rec.drive_time_s : null, rmse };
     this.last = sample; (this.recent = this.recent || []).push(sample); if (this.recent.length > 5) this.recent.shift();
-    for (const ev of e.stroke(sample)) this.say(ev.text);
+    for (const ev of e.stroke(sample)) this.say(ev.text, false, ev.say);
   }
 
   async finish(stopped) {
@@ -175,7 +179,7 @@ export class GuidedUI {
     } catch { /* no storage */ }
     const result = e.result({ hr_rest: rest > 0 ? rest : undefined, cfg, history });
     result.simulated = !!this.sim;
-    if (stopped) this.say("Session stopped.");
+    if (stopped) this.say("Session stopped.", false, [SPOKEN.stopped]);
     this.$("g_out").textContent = (this.sim ? "Simulated rower, not saved.\n" : "") + G.report(result);
     if (!this.sim) this.onResult(result);
     if (result.readiness) this.askFeel(result, !this.sim);
@@ -207,11 +211,20 @@ export class GuidedUI {
   }
 
   // ---------------------------------------------------------------- output
-  say(text, quiet = false) {
+  /** Show a cue, and speak it: from the recordings when `sentences` are all recorded, else in the browser's voice. */
+  say(text, quiet = false, sentences = null) {
     this.cues.push(text); if (this.cues.length > 4) this.cues.shift();
     this.$("g_said").textContent = this.cues.slice().reverse().join("  ·  ");
-    if (quiet || this.sim || !this.$("g_voice").checked || !("speechSynthesis" in window)) return;
-    const u = new SpeechSynthesisUtterance(text); u.rate = 1.05; window.speechSynthesis.speak(u);
+    if (quiet || this.sim || !this.$("g_voice").checked) return;
+    if (sentences && sentences.length) this.voice.speak(sentences, text); else this.speakBrowser(text);
+  }
+  speakBrowser(text) {
+    if (!("speechSynthesis" in window)) return Promise.resolve();
+    return new Promise(res => {
+      const u = new SpeechSynthesisUtterance(text); u.rate = 1.05; u.onend = u.onerror = () => res();
+      window.speechSynthesis.speak(u);
+      setTimeout(res, 15000);   // some browsers never report the end
+    });
   }
 
   draw() {

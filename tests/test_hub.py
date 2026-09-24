@@ -123,8 +123,11 @@ class HubApiTests(unittest.TestCase):
                 self.assertEqual(await get(port, b"/app.js"), (200, "text/javascript"))
                 self.assertEqual(await get(port, b"/logger-feed.js"), (200, "text/javascript"))
                 self.assertEqual(await get(port, b"/workouts.json"), (200, "application/json"))
+                self.assertEqual(await get(port, b"/voice/any-rate.mp3"), (200, "audio/mpeg"))
+                self.assertEqual((await get(port, b"/voice/manifest.json"))[0], 200)
                 for path in (b"/../pm5_logger.py", b"/%2e%2e/pm5_logger.py", b"/pm5_logger.py", b"/tests/fit.test.js",
-                             b"/examples/sample_row.jsonl", b"/.git", b"/package.json/", b"//etc/passwd"):
+                             b"/examples/sample_row.jsonl", b"/.git", b"/package.json/", b"//etc/passwd",
+                             b"/voice/../pm5_logger.py", b"/voice/x.js", b"/voice/Any-Rate.mp3", b"/tools/make_voice.py"):
                     self.assertEqual((await get(port, path))[0], 404, path)
                 s, page = await http(port, "GET", "/")
                 self.assertIn(b'<meta name="pm5-logger" content="{&quot;replay&quot;: &quot;2026-09-22_164718&quot;}">', page)

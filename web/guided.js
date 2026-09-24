@@ -7,6 +7,7 @@
 // (stroke rate, pace or watts, damper setting, a technique drill) and the part of the block that
 // counts for the analysis (the end of it, once heart rate has settled after the change).
 import * as V from "./vo2.js";
+import { say as SAY, FIXED as F } from "./voice.js";
 
 export const wattsFromPace = p => 2.8 / (p / 500) ** 3;              // Concept2's pace-power relation
 export const paceFromWatts = w => (w > 0 ? 500 * (2.8 / w) ** (1 / 3) : null);
@@ -47,15 +48,27 @@ function targetWords(t) {
   else if (t.watts != null) parts.push(`${Math.round(t.watts)} watts`);
   return parts.join(", ");
 }
+// Each block's cue is shown as `cue` and spoken as the short sentences in `say` (voice.js);
+// `announce` is what "In ten seconds" names when the block is next.
+function targetSay(t) {
+  const out = [];
+  if (t.damper != null) out.push(SAY.damper(t.damper));
+  if (t.rate != null) out.push(SAY.rate(t.rate));
+  if (t.pace_s != null) out.push(SAY.pace(t.pace_s));
+  else if (t.watts != null) out.push(SAY.watts(Math.round(t.watts)));
+  return out;
+}
 const recovery = () => ({ label: "Recovery heart rate", short: "recovery heart rate", role: "recovery", s: 60,
-  cue: "Stop rowing and sit still for one minute, for your recovery heart rate." });
+  cue: "Stop rowing and sit still for one minute, for your recovery heart rate.", say: [F.recovery], announce: [F.recoveryNext] });
 const warmup = (s, t = {}) => ({ label: "Warm-up", short: "warm-up", role: "warmup", s, ...t,
-  cue: `Warm up for ${minutesWords(s)}${targetWords(t) ? ", " + targetWords(t) : ", easy"}.` });
+  cue: `Warm up for ${minutesWords(s)}${targetWords(t) ? ", " + targetWords(t) : ", easy"}.`,
+  say: [F.warmup, ...(targetSay(t).length ? targetSay(t) : [F.easy]), SAY.duration(s)], announce: [F.warmup] });
 
 export function readinessBlock({ watts = 120, s = 300, count_s = null } = {}) {
   const c = count_s ?? Math.max(60, Math.min(120, s - 90));
   return { label: `Readiness check, ${watts} W`, short: "readiness check", role: "readiness", s, count_s: c, watts,
-    cue: `Readiness check: ${watts} watts for ${minutesWords(s)}, any rate.` };
+    cue: `Readiness check: ${watts} watts for ${minutesWords(s)}, any rate.`,
+    say: [F.readiness, SAY.watts(watts), SAY.duration(s), F.anyRate], announce: [F.readiness] };
 }
 
 // ---------------------------------------------------------------------------- fitting to a length
@@ -88,7 +101,8 @@ export function rateTest({ rates = [14, 17, 20], pace_s = 132, total_s = 1800, w
   return { kind: "rate", title: `Best stroke rate at ${fmtPace(pace_s)}`, params: { rates, pace_s, block_s, count_s, total_s: warm_s + block_s * order.length, warm_s }, warnings,
     blocks: [warmup(warm_s, { rate: warm_rate, pace_s }),
       ...order.map(r => ({ label: `${r} strokes a minute`, short: `${r} strokes a minute`, role: "test", key: r, rate: r, pace_s, s: block_s, count_s,
-        cue: `${r} strokes a minute, pace ${fmtPace(pace_s)}, for ${minutesWords(block_s)}.` })),
+        cue: `${r} strokes a minute, pace ${fmtPace(pace_s)}, for ${minutesWords(block_s)}.`,
+        say: [SAY.rate(r), SAY.pace(pace_s), SAY.duration(block_s)], announce: [SAY.rate(r)] })),
       recovery()] };
 }
 
@@ -101,7 +115,8 @@ export function dragSweep({ dampers = [3, 5, 7], pace_s = 132, total_s = 1800, w
   return { kind: "drag", title: `Drag sweep at ${fmtPace(pace_s)}`, params: { dampers, pace_s, block_s, count_s, total_s: warm_s + block_s * order.length, warm_s }, warnings,
     blocks: [warmup(warm_s, { pace_s }),
       ...order.map(d => ({ label: `damper ${d}`, short: `damper ${d}`, role: "test", key: d, damper: d, pace_s, s: block_s, count_s,
-        cue: `Set the damper to ${d}, then pace ${fmtPace(pace_s)} for ${minutesWords(block_s)}.` })),
+        cue: `Set the damper to ${d}, then pace ${fmtPace(pace_s)} for ${minutesWords(block_s)}.`,
+        say: [SAY.setDamper(d), SAY.pace(pace_s), SAY.duration(block_s)], announce: [SAY.damper(d)] })),
       recovery()] };
 }
 
@@ -112,7 +127,8 @@ export function hrCap({ ceiling = 148, total_s = 1500, start_pace_s = 135, warm_
   return { kind: "hrcap", title: `Capped at ${ceiling} bpm`, params: { ceiling, total_s, start_pace_s }, warnings,
     blocks: [warmup(warm_s, { pace_s: start_pace_s }),
       { label: `Capped row, ceiling ${ceiling}`, short: "the capped row", role: "test", key: "cap", control: "hrcap", ceiling, pace_s: start_pace_s, s,
-        cue: `Now I'll steer the pace to keep your heart rate under ${ceiling}. Start at ${fmtPace(start_pace_s)}.` },
+        cue: `Now I'll steer the pace to keep your heart rate under ${ceiling}. Start at ${fmtPace(start_pace_s)}.`,
+        say: [SAY.under(ceiling), SAY.pace(start_pace_s)], announce: [F.capped] },
       recovery()] };
 }
 
@@ -122,7 +138,8 @@ export function driftTest({ watts = 140, total_s = 2100, warm_s = 300 } = {}) {
   return { kind: "drift", title: `Drift test at ${watts} W`, params: { watts, total_s }, warnings,
     blocks: [warmup(warm_s, { watts }),
       { label: `Hold ${watts} W`, short: `${watts} watts`, role: "test", key: "hold", watts, s,
-        cue: `Hold ${watts} watts, pace ${fmtPace(paceFromWatts(watts))}, for ${minutesWords(s)}.` },
+        cue: `Hold ${watts} watts, pace ${fmtPace(paceFromWatts(watts))}, for ${minutesWords(s)}.`,
+        say: [SAY.watts(watts), SAY.pace(paceFromWatts(watts)), SAY.duration(s)], announce: [SAY.watts(watts)] },
       recovery()] };
 }
 
@@ -142,7 +159,9 @@ export function stepTest({ start_w = 110, step_w = 30, stages = 3, total_s = 150
   order.forEach((w, i) => {
     const top = i === stages;   // the top power again: say so, and that the way down comes next
     blocks.push({ label: `Stage ${i + 1}, ${w} W`, short: `stage ${i + 1}, ${w} watts`, role: "test", key: w, watts: w, s: stage_s, count_s,
-      cue: `Stage ${i + 1} of ${order.length}: ${top ? "stay at " : ""}${w} watts, pace ${fmtPace(paceFromWatts(w))}, for ${minutesWords(stage_s)}${top ? ", then back down the same steps" : ""}.` });
+      cue: `Stage ${i + 1} of ${order.length}: ${top ? "stay at " : ""}${w} watts, pace ${fmtPace(paceFromWatts(w))}, for ${minutesWords(stage_s)}${top ? ", then back down the same steps" : ""}.`,
+      say: [SAY.stage(i + 1, order.length), SAY.watts(w), SAY.pace(paceFromWatts(w)), SAY.duration(stage_s), ...(top ? [F.downAgain] : [])],
+      announce: [SAY.stage(i + 1, order.length)] });
   });
   blocks.push(recovery());
   return { kind: "step", title: `Step test from ${start_w} W`, params: { start_w, step_w, stages, stage_s, count_s, total_s: warm_s + order.length * stage_s }, warnings, blocks };
@@ -154,11 +173,14 @@ export function readinessCheck({ watts = 120 } = {}) {
 
 export const DRILLS = {
   peak: { label: "peak position", unit: "%", default: 45, better: "lower",
-    cue: t => `Drill: peak force by ${t} per cent of the drive. Push with the legs early.`, text: t => `peak position at or before ${t}%` },
+    cue: t => `Drill: peak force by ${t} per cent of the drive. Push with the legs early.`, text: t => `peak position at or before ${t}%`,
+    say: t => [F.drill, SAY.peak(t), F.legs] },
   ratio: { label: "drive : recovery", unit: "×", default: 2.5, better: "higher",
-    cue: t => `Drill: recovery at least ${t} times as long as the drive. Slow the slide.`, text: t => `recovery at least ${t} × the drive` },
+    cue: t => `Drill: recovery at least ${t} times as long as the drive. Slow the slide.`, text: t => `recovery at least ${t} × the drive`,
+    say: t => [F.drill, SAY.ratio(t), F.slide] },
   consistency: { label: "consistency", unit: "%", default: 8, better: "lower",
-    cue: () => "Drill: make every stroke the same shape.", text: t => `shape within ${t}% of your last ten strokes` },
+    cue: () => "Drill: make every stroke the same shape.", text: t => `shape within ${t}% of your last ten strokes`,
+    say: () => [F.drill, F.shape] },
 };
 export function drillHit(sample, drill) {
   if (!drill) return false;
@@ -177,8 +199,10 @@ export function drillSession({ drill = "peak", target = null, repeats = 3, total
   }
   const blocks = [warmup(warm_s)];
   for (let i = 0; i < repeats; i++) {
-    blocks.push({ label: `Drill ${i + 1}: ${DRILLS[drill].label}`, short: `drill ${i + 1}`, role: "drill", key: "drill", drill: d, s: drill_s, cue: DRILLS[drill].cue(d.target) });
-    blocks.push({ label: "Easy rowing", short: "easy rowing", role: "easy", key: "easy", drill: d, s: easy_s, cue: "Easy rowing. Relax." });
+    blocks.push({ label: `Drill ${i + 1}: ${DRILLS[drill].label}`, short: `drill ${i + 1}`, role: "drill", key: "drill", drill: d, s: drill_s, cue: DRILLS[drill].cue(d.target),
+      say: DRILLS[drill].say(d.target), announce: [F.drill] });
+    blocks.push({ label: "Easy rowing", short: "easy rowing", role: "easy", key: "easy", drill: d, s: easy_s, cue: "Easy rowing. Relax.",
+      say: [F.easyRowing, F.relax], announce: [F.easyRowing] });
   }
   return { kind: "drill", title: `Drill: ${DRILLS[drill].text(d.target)}`, params: { drill, target: d.target, repeats, total_s: warm_s + repeats * (drill_s + easy_s) }, warnings, blocks };
 }
@@ -194,7 +218,27 @@ export function withReadiness(protocol, opts = {}) {
 
 // ---------------------------------------------------------------------------- the engine
 
-const cue = text => ({ type: "cue", text });
+const cue = (text, say = null) => ({ type: "cue", text, say });
+
+/** The protocol's name, spoken before its first cue. */
+export const titleSay = kind => ({ rate: F.rateTest, drag: F.dragSweep, hrcap: F.hrcap, drift: F.drift, step: F.step, readiness: F.readinessTest, drill: F.drills })[kind] || null;
+
+/** Every sentence a session of this protocol might speak, so the page can fetch their recordings
+ *  before it starts: the blocks' cues, and for a capped row every pace and heart rate its
+ *  steering can reach. */
+export function sentencesFor(protocol) {
+  const out = [titleSay(protocol.kind), F.ready, F.stopped, F.tenSeconds, F.complete, F.endPiece];
+  for (const b of protocol.blocks) {
+    out.push(...(b.say || []), ...(b.announce || []));
+    if (b.role === "drill") for (let n = 0; n <= 10; n++) out.push(SAY.count(n));
+    if (b.control === "hrcap") {
+      out.push(F.hrLost);
+      for (let p = b.pace_s - 20; p <= b.pace_s + 40; p += 0.5) out.push(SAY.pace(p), SAY.ease(p), SAY.holding(p));
+      for (let h = b.ceiling; h <= b.ceiling + 40; h++) out.push(SAY.hr(h));
+    }
+  }
+  return [...new Set(out.filter(Boolean))];
+}
 
 export class Engine {
   constructor(protocol) {
@@ -210,6 +254,7 @@ export class Engine {
   begin(t0) { if (this.t0 === null) this.t0 = t0; }
   /** The first block's cue, spoken before the first stroke; the engine won't repeat it. */
   firstCue() { this.idx = 0; return this.blocks[0] ? this.blocks[0].cue : ""; }
+  firstSay() { return this.blocks[0] ? this.blocks[0].say || [] : []; }
   indexAt(rel) { for (let i = 0; i < this.blocks.length; i++) if (rel < this.blocks[i].end) return i; return this.blocks.length; }
 
   /** What the rower should be doing in block i. */
@@ -229,13 +274,13 @@ export class Engine {
     const i = this.indexAt(rel);
     if (i !== this.idx) {
       this.idx = i; this.drill = { hits: 0, n: 0 };
-      if (i >= this.blocks.length) { this.done = true; ev.push(cue("Session complete. End the piece on the monitor when you're ready.")); return ev; }
-      ev.push(cue(this.blocks[i].cue));
+      if (i >= this.blocks.length) { this.done = true; ev.push(cue("Session complete. End the piece on the monitor when you're ready.", [F.complete, F.endPiece])); return ev; }
+      ev.push(cue(this.blocks[i].cue, this.blocks[i].say));
     }
     const b = this.blocks[i];
     if (b.control === "hrcap" && this.pace == null) { this.pace = b.pace_s; this.spokenPace = b.pace_s; this.lastCtl = rel; }
     const next = this.blocks[i + 1];
-    if (next && b.end - rel <= 10 && !this.warned.has(i)) { this.warned.add(i); ev.push(cue(`In ten seconds: ${next.short || next.label}.`)); }
+    if (next && b.end - rel <= 10 && !this.warned.has(i)) { this.warned.add(i); ev.push(cue(`In ten seconds: ${next.short || next.label}.`, [F.tenSeconds, ...(next.announce || [])])); }
     if (b.control === "hrcap" && rel - this.lastCtl >= CONTROL_S) ev.push(...this._steer(b, rel));
     return ev;
   }
@@ -247,7 +292,7 @@ export class Engine {
       this.controlLog.push({ t: Math.round(rel), hr: null, pace_s: this.pace, held: true });
       if (this.hrLost) return [];
       this.hrLost = true;
-      return [cue(`Heart rate lost. Holding pace ${fmtPace(this.pace)}.`)];
+      return [cue(`Heart rate lost. Holding pace ${fmtPace(this.pace)}.`, [F.hrLost, SAY.holding(this.pace)])];
     }
     this.hrLost = false;
     const hr = mean(recent), c = b.ceiling;
@@ -257,10 +302,10 @@ export class Engine {
     this.controlLog.push({ t: Math.round(rel), hr: Math.round(hr * 10) / 10, pace_s: this.pace });
     if (hr > c && rel - this.lastWarn >= 30) {
       this.lastWarn = rel; this.spokenPace = this.pace;
-      return [cue(`Heart rate ${Math.ceil(hr)}. Ease off to ${fmtPace(this.pace)}.`)];
+      return [cue(`Heart rate ${Math.ceil(hr)}. Ease off to ${fmtPace(this.pace)}.`, [SAY.hr(Math.ceil(hr)), SAY.ease(this.pace)])];
     }
     // small steps are shown on the page, not spoken
-    if (Math.abs(this.pace - this.spokenPace) >= 2) { this.spokenPace = this.pace; return [cue(`Pace ${fmtPace(this.pace)}.`)]; }
+    if (Math.abs(this.pace - this.spokenPace) >= 2) { this.spokenPace = this.pace; return [cue(`Pace ${fmtPace(this.pace)}.`, [SAY.pace(this.pace)])]; }
     return [];
   }
 
@@ -272,7 +317,7 @@ export class Engine {
     const b = this.blocks[this.indexAt(rel)], ev = [];
     if (b && b.role === "drill") {
       this.drill.n++; if (drillHit(s, b.drill)) this.drill.hits++;
-      if (this.drill.n === 10) { ev.push(cue(`${this.drill.hits} of 10.`)); this.drill = { hits: 0, n: 0 }; }
+      if (this.drill.n === 10) { ev.push(cue(`${this.drill.hits} of 10.`, [SAY.count(this.drill.hits)])); this.drill = { hits: 0, n: 0 }; }
     }
     return ev;
   }
