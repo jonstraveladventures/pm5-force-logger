@@ -108,7 +108,7 @@ export class GuidedUI {
     this.save();
     this.engine = new G.Engine(protocol); this.pendingN = null; this.norms = []; this.cues = [];
     this.onRunning(true);
-    $("g_start").disabled = true; $("g_sim").disabled = true; $("g_stop").hidden = false; $("g_live").hidden = false; $("g_out").textContent = "";
+    $("g_start").disabled = true; $("g_sim").disabled = true; $("g_stop").hidden = false; $("g_live").hidden = false; $("g_out").textContent = ""; $("g_feel").hidden = true;
     if (simulate) {
       this.sim = new SimRower({ seed: Date.now() % 100000 }); this.realStart = Date.now() / 1000; this.simStart = this.realStart;
       this.H.reset({ replay: "a simulated rower" }); this.render();
@@ -171,14 +171,30 @@ export class GuidedUI {
     let history = [];
     try {
       history = (await this.DB.listSessions()).filter(s => s.guided && s.guided.readiness).sort((a, b) => a.started.localeCompare(b.started))
-        .map(s => ({ target_w: s.guided.readiness.target_w, adj_hr: s.guided.readiness.adj_hr }));
+        .map(s => ({ target_w: s.guided.readiness.target_w, adj_hr: s.guided.readiness.adj_hr, rpe: s.guided.readiness.rpe ?? null }));
     } catch { /* no storage */ }
     const result = e.result({ hr_rest: rest > 0 ? rest : undefined, cfg, history });
     result.simulated = !!this.sim;
     if (stopped) this.say("Session stopped.");
     this.$("g_out").textContent = (this.sim ? "Simulated rower, not saved.\n" : "") + G.report(result);
     if (!this.sim) this.onResult(result);
+    if (result.readiness) this.askFeel(result, !this.sim);
     this.reset();
+  }
+
+  /** After a readiness check: how hard it felt and any soreness, added to the report (and saved
+   *  with the row) when the rower answers. Asked afterwards, since nobody fills in a form mid-row. */
+  askFeel(result, save) {
+    const $ = this.$, x = result.readiness;
+    $("g_rpe").value = ""; $("g_sore").value = ""; $("g_note").value = "";
+    $("g_feel").hidden = false;
+    $("g_feel_save").onclick = () => {
+      const rpe = $("g_rpe").value;
+      Object.assign(x, { rpe: rpe === "" ? null : Number(rpe), soreness: $("g_sore").value || null, note: $("g_note").value.trim() || null });
+      $("g_out").textContent = (save ? "" : "Simulated rower, not saved.\n") + G.report(result);
+      $("g_feel").hidden = true;
+      if (save) this.onResult(result);
+    };
   }
 
   get running() { return !!this.engine; }
@@ -224,6 +240,7 @@ export class GuidedUI {
     }
     const hr = (this.sim ? this.sim.status() : this.S.status || {}).hr;
     if (hr) checks.push(`<span class="${tg.ceiling != null && hr > tg.ceiling ? "off" : ""}">HR ${hr}</span>`);
+    else checks.push(`<span class="off">no heart rate${tg.ceiling != null ? ": pace held" : ""}</span>`);
     $("g_check").innerHTML = checks.join("");
   }
 }

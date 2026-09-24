@@ -217,12 +217,16 @@ export class Session {
 
 /** Parse a raw log (the JSONL the Python logger writes, or this app exports) into meta and events. */
 export function readRaw(text) {
+  return readLines(text.split("\n").filter(line => line.trim()).map(line => JSON.parse(line)));
+}
+
+/** readRaw for a log already parsed into its lines. */
+export function readLines(lines) {
   const meta = {}, events = [];
-  for (const line of text.split("\n")) {
-    if (!line.trim()) continue;
-    const r = JSON.parse(line);
+  for (const r of lines) {
     if ("device" in r) meta.device = r.device;
     if ("workout" in r) { if (r.workout) meta.workout = r.workout; else delete meta.workout; }
+    if ("guided" in r) meta.guided = r.guided;   // a guided report the Python logger was sent
     if ("uuid" in r) events.push([r.t, parseInt(r.uuid, 16), hexToBytes(r.hex)]);
   }
   return { meta, events };

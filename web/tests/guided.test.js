@@ -5,12 +5,17 @@ import assert from "node:assert/strict";
 import * as G from "../guided.js";
 import { SimRower, simSample } from "../sim.js";
 
-function run(protocol, simOpts = {}, ctx = { hr_rest: 50 }) {
+/** mess: {hrGap: [from, to]} drops heart rate (a wrist sensor losing contact); {offPower: [from,
+ *  to, factor]} has the rower miss the target power by that factor. Times are session seconds. */
+function run(protocol, simOpts = {}, ctx = { hr_rest: 50 }, mess = {}) {
   const eng = new G.Engine(protocol), sim = new SimRower(simOpts), events = [];
+  const within = (t, span) => span && t >= span[0] && t < span[1];
   for (let t = 0; t < eng.total + 600 && !eng.done; t += 1) {
-    const target = eng.started ? eng.target(eng.indexAt(t - eng.t0)) : null;
-    for (const rec of sim.advance(t, 1, target)) { eng.begin(rec.t); events.push(...eng.stroke(simSample(rec))); }
-    events.push(...eng.tick(t, sim.status()));
+    let target = eng.started ? eng.target(eng.indexAt(t - eng.t0)) : null;
+    if (target && target.watts && within(t, mess.offPower)) target = { ...target, watts: target.watts * mess.offPower[2] };
+    const noHr = within(t, mess.hrGap);
+    for (const rec of sim.advance(t, 1, target)) { eng.begin(rec.t); events.push(...eng.stroke({ ...simSample(rec), hr: noHr ? null : rec.hr })); }
+    events.push(...eng.tick(t, { ...sim.status(), hr: noHr ? null : sim.status().hr }));
   }
   return { eng, r: eng.result(ctx), events, text: G.report(eng.result(ctx)) };
 }
@@ -44,6 +49,39 @@ test("the rate test finds the simulator's best rate despite heart-rate drift", (
     for (const g of r.groups.groups) assert.equal(g.blocks.length, 2);
     noJunk(text);
   }
+});
+
+test("a clear result names the best rate, and says each rate's two blocks agreed", () => {
+  const { r, text } = run(G.rateTest(), { spmOpt: 17, drift: 0.9, seed: 3 });
+  assert.equal(r.groups.verdict, "clear", text);
+  assert.match(text, /Lowest: 17 strokes a minute/);
+  // the simulator's own noise leaves a rate's two blocks up to about 2 bpm apart once drift is off
+  for (const g of r.groups.groups) assert.ok(g.spread != null && g.spread < 2.5, `rate ${g.key}: its blocks disagree by ${g.spread} beyond drift`);
+  assert.ok(r.groups.margin > r.groups.noise, `margin ${r.groups.margin} vs ${r.groups.noise}`);
+});
+
+test("a rate test names no rate when heart rate went missing in a block", () => {
+  const eng = new G.Engine(G.rateTest()), b = eng.blocks.filter(x => x.role === "test")[3];   // the second 20 s/m block
+  const { r, text } = run(G.rateTest(), { spmOpt: 17, seed: 3 }, { hr_rest: 50 }, { hrGap: [b.end - 120, b.end] });
+  assert.equal(r.groups.verdict, "inconclusive", text);
+  assert.match(text, /No rate is named/);
+  assert.match(text, /20 s\/m.*heart rate read for only \d+% of it/);
+  noJunk(text);
+});
+
+test("a rate test names no rate when a block was rowed off the target power", () => {
+  const eng = new G.Engine(G.rateTest()), b = eng.blocks.filter(x => x.role === "test")[1];   // the first 17 s/m block
+  const { r, text } = run(G.rateTest(), { spmOpt: 17, seed: 3 }, { hr_rest: 50 }, { offPower: [b.start, b.end, 0.8] });
+  assert.equal(r.groups.verdict, "inconclusive", text);
+  assert.match(text, /17 s\/m.*on the target power for only \d+% of it/);
+  noJunk(text);
+});
+
+test("a result too close to call says so rather than naming a winner", () => {
+  const { r, text } = run(G.rateTest(), { spmOpt: 17, c: 0.0003, seed: 3 });   // a rower barely affected by rate
+  assert.equal(r.groups.verdict, "close", text);
+  assert.match(text, /can't separate/);
+  assert.doesNotMatch(text, /Lowest: \d+ strokes a minute, [\d.]+ bpm below the next best/);
 });
 
 test("cues come at every block change, ten seconds before, and at the end", () => {
@@ -124,11 +162,27 @@ test("the capped row holds heart rate at the ceiling and reports the watts there
   noJunk(text);
 });
 
+test("the capped row holds its pace while heart rate is missing, and says so", () => {
+  const eng = new G.Engine(G.hrCap({ ceiling: 148, total_s: 1500, start_pace_s: 140 }));
+  const b = eng.blocks.find(x => x.control === "hrcap"), gap = [b.start + 400, b.start + 520];
+  const { r, eng: e, events, text } = run(G.hrCap({ ceiling: 148, total_s: 1500, start_pace_s: 140 }), { seed: 5 }, { hr_rest: 50 }, { hrGap: gap });
+  const during = e.controlLog.filter(c => c.t > gap[0] + 20 && c.t <= gap[1]);
+  assert.ok(during.length >= 4 && during.every(c => c.held && c.pace_s === during[0].pace_s), JSON.stringify(during));
+  assert.equal(events.filter(ev => /Heart rate lost/.test(ev.text)).length, 1, "said once, not every 20 s");
+  assert.ok(r.hrcap.missing_frac > 0.08 && r.hrcap.missing_frac < 0.12, `missing ${r.hrcap.missing_frac}`);
+  assert.match(text, /heart rate was missing for \d+% of the capped time, and the pace was held then/);
+  assert.ok(e.controlLog.some(c => c.t > gap[1] + 20 && !c.held), "steering resumes when heart rate returns");
+});
+
 test("the drift test measures decoupling, and none when the heart rate doesn't drift", () => {
   const withDrift = run(G.driftTest({ watts: 140, total_s: 2100 }), { drift: 0.4, seed: 9 }).r.drift.decoupling_pct;
   assert.ok(withDrift > 3 && withDrift < 6, `decoupling ${withDrift}`);
   const none = run(G.driftTest({ watts: 140, total_s: 2100 }), { drift: 0, seed: 9 }).r.drift.decoupling_pct;
   assert.ok(Math.abs(none) < 1, `decoupling without drift ${none}`);
+  const { text } = run(G.driftTest({ watts: 140, total_s: 2100 }), { drift: 0.4, seed: 9 });
+  assert.match(text, /power per heartbeat fell [\d.]+% from the first half to the second/);
+  assert.match(text, /A common rule of thumb reads under 5% as a pace you can hold aerobically; it assumes/);
+  assert.doesNotMatch(text, /usually taken to mean/);
 });
 
 test("the step test goes up and back down, so drift doesn't steepen the line", () => {
@@ -182,7 +236,27 @@ test("the readiness check adjusts to its power and compares with earlier checks"
   assert.ok(x.adj_hr > 113 && x.adj_hr < 122, `adjusted ${x.adj_hr}`);
   assert.equal(x.n_history, 2);                       // the 150 W check is a different test
   assert.equal(x.usual, 121.5);
-  assert.match(text, /below it/);
+  assert.match(text, /your usual is set once there are 3 earlier checks; this is check 3/i, "two earlier checks are not yet a baseline");
+  assert.doesNotMatch(text, /above it|below it|unusual/);
+  noJunk(text);
+});
+
+test("with a baseline, an unusual reading is a prompt to look further, and effort and soreness are reported", () => {
+  const history = [121, 122, 120].map(adj_hr => ({ target_w: 120, adj_hr, rpe: 3 }));
+  const { r } = run(G.readinessCheck({ watts: 120 }), { seed: 13 }, { hr_rest: 50, history });
+  const x = r.readiness;
+  assert.equal(x.usual_rpe, 3);
+  assert.match(G.report(r), /Your usual is 121\.0 \(median of 3\); today is [\d.]+ below it\./);
+  assert.doesNotMatch(G.report(r), /unusual/);
+  Object.assign(x, { rpe: 6, soreness: "a little", note: "left elbow" });          // entered after the check
+  const text = G.report(r);
+  assert.match(text, /Effort 6\/10 \(usually 3\.0\)\. Soreness or feeling unwell: a little\. Note: left elbow\./);
+  assert.match(text, /That is unusual for you\. It is a prompt to weigh sleep, illness, soreness and recent training together/);
+  assert.doesNotMatch(text, /fatigue or illness/, "no diagnosis");
+  const first = run(G.readinessCheck({ watts: 120 }), { seed: 13 }, { hr_rest: 50 }).r;          // no usual yet
+  first.readiness.soreness = "a lot";
+  assert.match(G.report(first), /this is check 1\. Soreness or feeling unwell: a lot\. Marked soreness or feeling unwell is a prompt/);
+  assert.doesNotMatch(G.report(first), /unusual for you/, "no usual to be unusual against");
   noJunk(text);
 });
 

@@ -1,9 +1,9 @@
 // The live dashboard: tiles, the force curve with its shape measures, trends and the stroke
-// table. The same code as pm5_dashboard.html (served by the Python logger), fed here by the
-// page itself through H (the event handlers) instead of server-sent events.
+// table, fed through H (the event handlers): by the page's own Session when it holds the PM5,
+// or by the Python logger's server-sent events when the logger serves the page (logger-feed.js).
 import { trim, resample, metrics, smoothed, CM_PER_POINT } from "./curve.js";
 export { trim, resample, metrics };
-export const S = { strokes: new Map(), status: {}, summary: {}, device: {}, splits: new Map() };
+export const S = { strokes: new Map(), status: {}, summary: {}, device: {}, splits: new Map(), hrSeen: null };   // hrSeen: the last heart rate and when
 // Characteristic 0x0043 is force against handle travel: each reading is 3.5/3 inches of the handle
 // moving away from the flywheel (Concept2, for RowErg models B to D). 0x003D is force against time.
 const handleCm = pts => { const t = trim(pts); return t ? t.length * CM_PER_POINT : null; };
@@ -67,7 +67,10 @@ function renderTiles() {
   setTile("pace", fmtPace(st.pace_s), st.avg_pace_s ? `average ${fmtPace(st.avg_pace_s)}` : "");
   setTile("rate", n0(st.stroke_rate), "strokes/min");
   setTile("power", last && last.power_w != null ? `${last.power_w} W` : "—", st.avg_power_w ? `average ${st.avg_power_w} W` : "");
-  setTile("hr", st.hr ? n0(st.hr) : "—", st.hr ? "bpm" : "no HR source paired");
+  // a heart rate that has dropped out shows its last value, dimmed, with how long ago it was read
+  const lostS = !st.hr && S.hrSeen ? Math.round((Date.now() - S.hrSeen.at) / 1000) : null;
+  setTile("hr", st.hr ? n0(st.hr) : lostS != null ? n0(S.hrSeen.hr) : "—", st.hr ? "bpm" : lostS != null ? `lost ${lostS} s ago` : "no HR source paired");
+  $("tile_hr").classList.toggle("stale", lostS != null);
   setTile("peak", last ? `${n0(last.peak_force_lbf)}` : "—", last ? `lbf · average ${n0(last.avg_force_lbf)}` : "");
   setTile("drive", last ? `${n2(last.drive_length_m)} m` : "—", last ? `${n2(last.drive_time_s)} s` : "");
   const prev = S.strokes.get(last && last.stroke_count - 1); const rec = last && (last.recovery_time_s ?? (prev && prev.recovery_time_s));
@@ -105,7 +108,7 @@ function drawCurve() {
   const avg = meanCurve(series.map(m => m.norm));
   const ymax = Math.max(40, ...list.slice(-9).map(s => Math.max(...trim(pts(s))))) * 1.1;
   g.strokeStyle = css("--grid"); g.lineWidth = 1; g.fillStyle = css("--ink3"); g.font = canvasFont();
-  for (let f = 0; f <= ymax; f += ymax > 150 ? 50 : 25) { const y = pad.t + ph - f / ymax * ph; g.beginPath(); g.moveTo(pad.l, y); g.lineTo(w - pad.r, y); g.stroke(); g.fillText(`${f}`, 8, y + 4); }
+  for (let f = 0; f <= ymax; f += ymax > 150 ? 50 : 25) { const y = pad.t + ph - f / ymax * ph; g.beginPath(); g.moveTo(pad.l, y); g.lineTo(w - pad.r, y); g.stroke(); g.textAlign = "right"; g.fillText(`${f}`, pad.l - 6, y + 4); }
   g.textAlign = "center";
   const lenCm = src() === "force_curve_v2" && cur ? handleCm(pts(cur)) : null;
   for (let p = 0; p <= 100; p += 20) g.fillText(lenCm ? `${Math.round(p / 100 * lenCm)}` : `${p}%`, pad.l + p / 100 * pw, pad.t + ph + 16);
@@ -138,7 +141,7 @@ function renderMetrics() {
   const peakN = cur.peak_force_lbf ? cur.peak_force_lbf * 4.448 : null, mass = massKg();
   const bandRow = (name, value, unit, key, note) => B && value != null ? [[name, `${unit === "m" ? n2(value) : n0(value)} ${unit}`, `RP3 ${$("bands").value}: ${bandText(B[key])}`, `<span class="flag">${bandOf(value, B[key])}</span>`, note]] : [];
   const rows = [
-    ["Peak position", src() === "force_curve_v2" ? `${m.a100}% · ${Math.round(m.a100 / 100 * handleCm(pts(cur)))} cm` : `${m.a100}%`, label(T.a100), flag(m.a100, T.a100, "early", "late"), "Where in the drive force peaks. Kleshnev's crews peak early (legs); RP3's rounded stroke peaks just before the oar is square, around 43–48%. Later than 55% points to the back taking over from the legs."],
+    ["Peak position", src() === "force_curve_v2" ? `${m.a100}% · ${Math.round(m.a100 / 100 * handleCm(pts(cur)))} cm` : `${m.a100}%`, label(T.a100), flag(m.a100, T.a100, "early", "late"), "Where in the drive force peaks. Kleshnev's crews peak early (legs); RP3's rounded stroke peaks just before the oar is square, around 43–48%. Later than about 55% is a late peak; compare it with your own curves at a similar power and rate before reading a cause into it."],
     ["Catch gradient", `${m.a70}%`, label(T.a70), flag(m.a70, T.a70, "", "slow"), "How far into the drive before force reaches 70% of peak: how quickly the legs load."],
     ["Finish plateau", `${m.d70}%`, label(T.d70), flag(m.d70, T.d70, "short", "long"), "How long force stays above 70% of peak after the peak: the back and arms carrying it on."],
     ["Rectangle index", `${n0(m.ram)}%`, label(T.ram), flag(m.ram, T.ram, "peaky", "flat"), "Average force as a share of peak. Higher is a fuller curve; a parabola scores 67%."],
@@ -214,6 +217,12 @@ const UI = { text: ["--text", 1, v => `${Math.round(v * 100)}%`, v => v],
              trend: ["--trend-h", 120, v => `${v} px`, v => `${v}px`],
              rows: [null, 12, v => `${v}`, v => v] };
 const hidden = new Set();
+// A phone opens on the numbers read from the seat, the curve, and the controls for a row; the
+// rest is hidden and put after them until the display menu or a drag says otherwise. Hiding a
+// part changes only what is drawn: every stroke is still recorded and saved.
+const PHONE = matchMedia("(max-width: 640px)").matches;
+const PHONE_SHOWN = new Set(["tile_time", "tile_dist", "tile_pace", "tile_rate", "tile_hr", "tile_peak", "panel_curve", "setup", "guided", "sessions"]);
+const PHONE_ORDER = ["tiles", "main", "guided", "setup", "more", "trends", "tablewrap"];
 function loadUI() { try { return JSON.parse(localStorage.getItem("pm5_display")) || {}; } catch { return {}; } }
 const uiValue = k => { const el = $("ui_" + k); const v = el ? parseFloat(el.value) : NaN; return Number.isNaN(v) ? UI[k][1] : v; };
 
@@ -255,7 +264,7 @@ const saveLayout = l => { try { localStorage.setItem("pm5_layout", JSON.stringif
 const containerId = el => (el.parentElement === document.body ? "body" : el.parentElement.id || null);
 
 function applyOrder() {
-  const { order = {} } = loadLayout();
+  const order = loadLayout().order || (PHONE ? { body: PHONE_ORDER } : {});
   for (const [cid, ids] of Object.entries(order)) {
     const parent = cid === "body" ? document.body : $(cid);
     if (!parent) continue;
@@ -372,7 +381,7 @@ function applyUI(save = true) {
 (function initUI() {
   const saved = loadUI();
   for (const [k, [, dflt]] of Object.entries(UI)) { const el = $("ui_" + k); if (!el) continue; el.value = saved[k] ?? dflt; el.addEventListener("input", () => applyUI()); }
-  for (const id of saved.hidden || []) hidden.add(id);
+  for (const id of saved.hidden || (PHONE ? allParts().map(([id]) => id).filter(id => !PHONE_SHOWN.has(id)) : [])) hidden.add(id);
   applyOrder(); applySizes();
   $("ui_parts").innerHTML = partGroups().map(([g, items]) =>
     `<div class="pgroup"><b>${g}</b>${items.map(([id, l]) => `<label><input type="checkbox" data-part="${id}"> ${l}</label>`).join("")}</div>`).join("");
@@ -384,8 +393,8 @@ function applyUI(save = true) {
   $("ui_customise").addEventListener("change", () => applyUI());
   $("ui_showall").addEventListener("click", () => { hidden.clear(); applyUI(); });
   $("ui_reset").addEventListener("click", () => {
-    for (const [k, [, dflt]] of Object.entries(UI)) { const el = $("ui_" + k); if (el) el.value = dflt; }
-    hidden.clear(); saveLayout({}); location.reload();          // the saved order is undone by reloading the page as written
+    try { localStorage.removeItem("pm5_display"); localStorage.removeItem("pm5_layout"); } catch { /* private mode */ }
+    location.reload();          // the page as written, or the phone's starting layout
   });
   applyUI(false);
 })();
@@ -405,12 +414,12 @@ $("saveref").addEventListener("click", () => {
 
 // ---------- the event handlers the session feeds ----------
 export const H = {
-  snapshot: d => { S.strokes.clear(); d.strokes.forEach(s => S.strokes.set(s.stroke_count, s)); S.status = d.status || {}; S.summary = d.summary || {};
+  snapshot: d => { S.hrSeen = null; S.strokes.clear(); d.strokes.forEach(s => S.strokes.set(s.stroke_count, s)); S.status = d.status || {}; S.summary = d.summary || {};
     S.splits.clear(); (d.splits || []).forEach(sp => S.splits.set(sp.split_number, sp)); },
   split: d => { S.splits.set(d.split_number, { ...d }); },
-  reset: d => { S.strokes.clear(); S.splits.clear(); S.status = {}; S.summary = {}; $("banner").textContent = d && d.replay ? `replaying ${d.replay}` : ""; },
+  reset: d => { S.strokes.clear(); S.splits.clear(); S.status = {}; S.summary = {}; S.hrSeen = null; $("banner").textContent = d && d.replay ? `replaying ${d.replay}` : ""; },
   device: d => { S.device = d; $("banner").textContent = `${d.name || "PM5"}${d.firmware_rev ? " · firmware " + d.firmware_rev : ""}${d.workout ? " · " + d.workout : ""}`; },
-  status: d => { S.status = d; },
+  status: d => { S.status = d; if (d.hr) S.hrSeen = { hr: d.hr, at: Date.now() }; },
   stroke: d => { S.strokes.set(d.stroke_count, d); },
   stroke_update: d => { const s = S.strokes.get(d.stroke_count); if (s) Object.assign(s, d); },
   curve: d => { const s = S.strokes.get(d.stroke_count); if (s) s[d.key] = d.points; },

@@ -240,7 +240,9 @@ export function encode(sess) {
   const lapList = laps(sess, totalS, totalM);
   let recDefined = false, lapDefined = false, cyclesBefore = 0;
   lapList.forEach((lap, i) => {
-    const mine = recs.filter(r => r.elapsed_s > lap.start_s - 1e-6 && (i === lapList.length - 1 || r.elapsed_s <= lap.end_s + 1e-6));
+    // each lap takes the strokes after its start up to and including its end, so a stroke that
+    // lands on a boundary belongs to the lap it finished; the first and last laps are open-ended
+    const mine = recs.filter(r => (i === 0 || r.elapsed_s > lap.start_s + 1e-6) && (i === lapList.length - 1 || r.elapsed_s <= lap.end_s + 1e-6));
     if (mine.length) {
       if (!recDefined) { messages(buf, 6, MESG.record, recFields, recDev, mine); recDefined = true; }
       else for (const row of mine) { buf.u8(6); for (const f of recFields) writeValue(buf, f, row[f.key]); for (const d of recDev) writeValue(buf, d, row[d.key]); }

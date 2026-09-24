@@ -2,6 +2,10 @@
 // session JSON and raw JSONL the Python logger writes, so its tools read them unchanged.
 const DB_NAME = "pm5-force-logger", VERSION = 1;
 
+/** Whether a string is a row's name, the time it started (2026-09-22_164718), as every row the
+ *  page or the Python logger saves is named. Anything else read from a file is refused. */
+export const isRowId = id => typeof id === "string" && /^\d{4}-\d{2}-\d{2}_\d{6}$/.test(id);
+
 function open() {
   return new Promise((resolve, reject) => {
     const r = indexedDB.open(DB_NAME, VERSION);
@@ -30,6 +34,7 @@ export const putRaw = (started, lines) => run("raw", "readwrite", s => s.put({ s
 export const getSession = started => run("sessions", "readonly", s => s.get(started));
 export const getRaw = started => run("raw", "readonly", s => s.get(started));
 export const listSessions = () => run("sessions", "readonly", s => s.getAll());
+export const listRawIds = () => run("raw", "readonly", s => s.getAllKeys());
 export async function deleteSession(started) {
   await run("sessions", "readwrite", s => s.delete(started));
   await run("raw", "readwrite", s => s.delete(started));

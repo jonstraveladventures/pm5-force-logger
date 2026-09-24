@@ -41,7 +41,8 @@ above it at a net efficiency of 0.21 (20.9 kJ per litre of oxygen); at 300 W for
 that is 4.4 l/min, the figure Concept2's calculator (Hagerman's data) gives a fitness rower
 with a 7:00 2k.
 
-Expect the VO2max estimate to sit within 10 to 15% of a laboratory value. The maximum heart
+Heart-rate estimates of VO2max are usually reported within 10 to 15% of a laboratory value; this
+one has not been checked against one. The maximum heart
 rate (an age estimate is typically 10 bpm out), wrist-optical heart rate while rowing, cardiac
 drift, and rowing economy at an unusual stroke rate all feed straight into it. The watts at a
 fixed heart rate near the one you rowed at need almost no extrapolation and are the sturdier

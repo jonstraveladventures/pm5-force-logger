@@ -37,6 +37,7 @@
   .tile .label { font-size: .82rem; color: var(--ink3); text-transform: uppercase; letter-spacing: .04em; }
   .tile .value { font-size: clamp(1.5rem, calc(2.5vw * var(--text)), 2.4rem); font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.1; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: clip; }
   .tile .sub { font-size: .88rem; color: var(--ink2); font-variant-numeric: tabular-nums; }
+  .tile.stale .value { color: var(--ink3); } .tile.stale .sub { color: var(--warn); }
   main { display: grid; grid-template-columns: var(--curve-w) minmax(0, 1fr); gap: 12px; padding: 4px 20px 12px; }
   .panel { background: var(--panel); border-radius: 10px; padding: 12px 14px; min-width: 0; }
   .panel h2 { font-size: 1.06rem; font-weight: 600; margin: 0 0 8px; color: var(--ink2); }
@@ -92,6 +93,9 @@
   .setup input[type=text] { width: 15em; }
   #wo_status { font-size: .82rem; } #wo_status.ok { color: var(--good); } #wo_status.err { color: var(--warn); }
   #hover { font-size: .82rem; color: var(--ink2); min-height: 18px; font-variant-numeric: tabular-nums; }
+  #unsaved { margin: 8px 20px; padding: 10px 12px; border: 1px solid var(--warn); border-radius: 8px; font-size: .94rem; }
+  #unsaved div + div { margin-top: 8px; }
+  #unsaved button { margin: 4px 6px 0 0; }
   #intro { margin: 8px 20px; font-size: .94rem; color: var(--ink2); max-width: 62em; }
   #intro p { margin: 6px 0; }
   #intro ol { margin: 6px 0 6px 1.2em; padding: 0; }
@@ -119,6 +123,23 @@
   #g_next, #g_said { font-size: .82rem; color: var(--ink3); margin-top: 4px; }
   #g_plan { margin-top: 4px; color: var(--ink2); } #g_plan.warn { color: var(--warn); } #g_plan.err { color: #e5534b; }
   @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  /* a phone on the rower: narrower margins, and numbers big enough to read from the seat */
+  @media (max-width: 640px) {
+    header { padding: 8px 12px 4px; gap: 8px; }
+    .tiles, .setup, .trends, .tablewrap { padding-left: 12px; padding-right: 12px; }
+    main { padding: 4px 12px 12px; }
+    .more { padding: 0 12px 16px; }
+    #intro, .guided, #unsaved { margin-left: 12px; margin-right: 12px; }
+    .tile .value { font-size: clamp(1.8rem, calc(9vw * var(--text)), 3rem); }
+    #panel_curve > .row:first-child > .row, #panel_curve .legend { display: none; }   /* the curve's settings are for the laptop */
+    /* saved rows: each row a block, its buttons on a line of their own so none fall off the edge */
+    #sessions table, #sessions thead, #sessions tbody { display: block; }
+    #sessions tr { display: grid; grid-template-columns: 1fr auto auto auto; gap: 0 10px; align-items: baseline; padding: 6px 0; border-bottom: 1px solid var(--grid); }
+    #sessions th, #sessions td { padding: 0; border: 0; }
+    #sessions th:last-child { display: none; }
+    #sessions td:last-child { grid-column: 1 / -1; padding-top: 4px; text-align: left; }
+    #sessions td button { margin: 2px 4px 2px 0; }
+  }
 </style>
 </head>
 <body>
@@ -145,6 +166,8 @@
   </div><div class="parts" id="ui_parts"></div></details>
   <span id="banner"></span>
 </header>
+
+<div id="unsaved" hidden></div>
 
 <div id="intro">
   <p><b>Record a Concept2 PM5 from this page: every stroke's force curve, live, with nothing to install.</b> Rows are kept in this browser and leave it only as files you download. Nothing is sent anywhere.</p>
@@ -189,6 +212,13 @@
     <div id="g_said"></div>
   </div>
   <pre id="g_out"></pre>
+  <div id="g_feel" class="fields" hidden>
+    <span>How did the readiness check feel?</span>
+    <label title="0 is resting, 10 is as hard as you can go">effort (0–10) <select id="g_rpe"><option value="">choose…</option><option>0</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option><option>9</option><option>10</option></select></label>
+    <label>soreness or feeling unwell <select id="g_sore"><option value="">choose…</option><option>none</option><option>a little</option><option>a lot</option></select></label>
+    <label>note <input type="text" id="g_note" maxlength="80" placeholder="optional"></label>
+    <button id="g_feel_save">Add to the report</button>
+  </div>
 </section>
 
 <section class="tiles" id="tiles"></section>
@@ -240,17 +270,19 @@
       <label>mass (kg) <input type="number" id="fit_mass" min="30" max="200" step="0.5"></label>
       <label>max heart rate <input type="number" id="fit_hrmax" min="100" max="230"></label>
       <label>resting heart rate <input type="number" id="fit_rest" min="30" max="120"></label>
-      <label>report watts at (bpm) <input type="number" id="fit_zone" min="60" max="220"></label>
+      <label title="Your aerobic ceiling, such as the top of zone 2: the report gives the watts you hold at it, and the progress report the time spent above it">zone ceiling (bpm) <input type="number" id="fit_zone" min="60" max="220"></label>
       <button id="fit_save">Save</button>
       <button id="fit_all">Across all saved rows</button>
+      <button id="fit_progress" title="Each piece you have rowed more than once (the same distance or time set on the monitor), row by row, with its trend">Progress on repeated pieces</button>
     </div>
     <pre id="fit_out"></pre>
-    <div class="note"><span class="hint" tabindex="0">what these numbers mean<span class="tip">From the steady part of a row (after minute five, before the last minute, sprints and pauses dropped), on the line through your resting heart rate; with three or more rows spanning 40 W the line is fitted to your rows instead. The watts at a heart rate near the one you rowed at is the sturdier number; the VO2max is good to 10 to 15 per cent. These settings stay in this browser.<br><br>This is a hobby project, not coaching or medical advice. The shape targets are guides from published rowing research, the fitness numbers are rough estimates, and rowing hard carries the usual risks, so row within your own limits and talk to a professional about your health. The software is offered as is, under the MIT licence, and its authors accept no liability for its use.</span></span></div>
+    <div class="note"><span class="hint" tabindex="0">what these numbers mean<span class="tip">From the steady part of a row (after minute five, before the last minute, sprints and pauses dropped), on the line through your resting heart rate; with three or more rows spanning 40 W the line is fitted to your rows instead. The watts at a heart rate near the one you rowed at is the sturdier number; the VO2max is a model estimate: methods like this are usually reported within 10 to 15 per cent of a laboratory measurement, and this one has not been checked against one. These settings stay in this browser.<br><br>This is a hobby project, not coaching or medical advice. The shape targets are guides from published rowing research, the fitness numbers are rough estimates, and rowing hard carries the usual risks, so row within your own limits and talk to a professional about your health. The software is offered as is, under the MIT licence, and its authors accept no liability for its use.</span></span></div>
   </div>
   <div class="panel" id="sessions">
     <h2>Saved rows</h2>
     <div id="sessions_list" class="note">none yet</div>
     <div class="note" style="margin-top:8px">Files match the Python logger's: the session JSON has one record per stroke with both force curves; the raw log has every Bluetooth message and can rebuild the session later.</div>
+    <div class="fields" style="margin-top:8px"><label class="filebtn" title="Session JSON or raw log files saved on a phone, another browser or by the Python logger">Add rows from files<input type="file" id="importfiles" accept=".json,.jsonl,application/json,application/x-ndjson" multiple hidden></label><span id="import_status" class="note"></span></div>
   </div>
 </section>
 

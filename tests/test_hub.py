@@ -101,6 +101,79 @@ class HubApiTests(unittest.TestCase):
                 await server.wait_closed()
         asyncio.run(run())
 
+    def test_serves_the_web_page_and_nothing_else(self):
+        """The dashboard is web/, the browser version: its top-level files are served with types a
+        module script will load, and no path reaches the rest of the repository."""
+        async def get(port, path):
+            r, w = await asyncio.open_connection("127.0.0.1", port)
+            w.write(b"GET %s HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n" % path)
+            await w.drain()
+            head = await r.readuntil(b"\r\n\r\n")
+            w.close()
+            ctype = re.search(rb"Content-Type: ([^\r;]+)", head)
+            return int(head.split()[1]), ctype and ctype.group(1).decode()
+
+        async def run():
+            hub = L.Hub(replay="2026-09-22_164718")
+            server = await asyncio.start_server(hub.handle, "127.0.0.1", 0)
+            port = server.sockets[0].getsockname()[1]
+            try:
+                self.assertEqual(await get(port, b"/"), (200, "text/html"))
+                self.assertEqual(await get(port, b"/?fresh=1"), (200, "text/html"))
+                self.assertEqual(await get(port, b"/app.js"), (200, "text/javascript"))
+                self.assertEqual(await get(port, b"/logger-feed.js"), (200, "text/javascript"))
+                self.assertEqual(await get(port, b"/workouts.json"), (200, "application/json"))
+                for path in (b"/../pm5_logger.py", b"/%2e%2e/pm5_logger.py", b"/pm5_logger.py", b"/tests/fit.test.js",
+                             b"/examples/sample_row.jsonl", b"/.git", b"/package.json/", b"//etc/passwd"):
+                    self.assertEqual((await get(port, path))[0], 404, path)
+                s, page = await http(port, "GET", "/")
+                self.assertIn(b'<meta name="pm5-logger" content="{&quot;replay&quot;: &quot;2026-09-22_164718&quot;}">', page)
+            finally:
+                server.close()
+                await server.wait_closed()
+        asyncio.run(run())
+
+
+class GuidedTests(unittest.TestCase):
+    """A guided session run on the dashboard keeps its report with the row the logger records,
+    as the browser version does; the readiness check reads earlier reports back."""
+
+    def test_report_goes_to_the_row_and_comes_back(self):
+        import tempfile
+        report = {"kind": "step", "step": {"balanced": True, "stages": [{"w": 110, "hr": 120}]}}
+
+        async def run(out):
+            hub = L.Hub()
+            server = await asyncio.start_server(hub.handle, "127.0.0.1", 0)
+            port = server.sockets[0].getsockname()[1]
+            try:
+                s, body = await http(port, "POST", "/guided", {"guided": report})
+                self.assertEqual(s, 503)                  # nothing recording: a replay, or the row is over
+                kept = []
+                hub.take_guided = kept.append
+                self.assertEqual((await http(port, "POST", "/guided", {"nothing": 1}))[0], 400)
+                s, body = await http(port, "POST", "/guided", {"guided": report})
+                self.assertEqual((s, kept), (200, [report]))
+                (out / "sessions").mkdir()
+                (out / "sessions" / "2026-09-20_080000.json").write_text(json.dumps({"strokes": []}))
+                (out / "sessions" / "2026-09-21_080000.json").write_text(json.dumps({"guided": report}))
+                (out / "sessions" / "2026-09-22_080000.json").write_text("not json")
+                s, body = await http(port, "GET", "/guided")
+                self.assertEqual(json.loads(body), {"sessions": [{"started": "2026-09-21_080000", "guided": report}]})
+            finally:
+                server.close()
+                await server.wait_closed()
+
+        with tempfile.TemporaryDirectory() as d:
+            old, L.OUT = L.OUT, Path(d)
+            try:
+                asyncio.run(run(Path(d)))
+                raw = Path(d) / "row.jsonl"
+                raw.write_text(json.dumps({"t": 1, "device": {"name": "PM5"}}) + "\n" + json.dumps({"t": 2, "guided": report}) + "\n")
+                self.assertEqual(L.read_raw(raw)[0]["guided"], report)   # so --reparse keeps it
+            finally:
+                L.OUT = old
+
 
 class ContentLengthTests(unittest.TestCase):
     """A Content-Length the server will not honour is answered, not read. Without this the
@@ -151,6 +224,30 @@ class OriginTests(unittest.TestCase):
         self.assertFalse(ok(b" 127.0.0.1:8750\r\n", b" https://evil.example\r\n"), "a page on another site")
         self.assertFalse(ok(b" 127.0.0.1:8750\r\n", b" null\r\n"), "a sandboxed frame or a file")
         self.assertFalse(ok(b" 127.0.0.1:8750\r\n", b" http://localhost.evil.example\r\n"))
+        # another page on this machine is not the dashboard: the port and scheme must match too
+        self.assertFalse(ok(b" localhost:8750\r\n", b" http://localhost:9999\r\n"), "a page on another local port")
+        self.assertFalse(ok(b" localhost:8750\r\n", b" https://localhost:8750\r\n"), "the dashboard is plain http")
+        self.assertFalse(ok(b" localhost:8750\r\n", b" http://localhost\r\n"), "port 80 is not 8750")
+        self.assertFalse(ok(b" localhost:8750\r\n", b" http://localhost:bad\r\n"))
+        self.assertTrue(ok(b" localhost\r\n", b" http://127.0.0.1\r\n"), "both on port 80")
+
+    def test_a_stalled_request_is_dropped(self):
+        """A request whose headers never finish is closed after HEAD_TIMEOUT_S, not held open."""
+        async def run():
+            old, L.HEAD_TIMEOUT_S = L.HEAD_TIMEOUT_S, 0.2
+            server = await asyncio.start_server(L.Hub().handle, "127.0.0.1", 0)
+            port = server.sockets[0].getsockname()[1]
+            try:
+                r, w = await asyncio.open_connection("127.0.0.1", port)
+                w.write(b"POST /program HTTP/1.1\r\nHost: 127.0.0.1\r\n")   # and never the blank line
+                await w.drain()
+                self.assertEqual(await asyncio.wait_for(r.read(), 2), b"")    # the server hung up
+                w.close()
+            finally:
+                L.HEAD_TIMEOUT_S = old
+                server.close()
+                await server.wait_closed()
+        asyncio.run(run())
 
     def test_a_foreign_page_cannot_stop_the_workout(self):
         async def run():

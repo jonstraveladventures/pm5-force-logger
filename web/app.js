@@ -1,6 +1,8 @@
 // The page: connects to the PM5, feeds its notifications through the Session, drives the
 // dashboard, programs workouts, saves finished rows in the browser and shows the fitness report.
-import { Session, readRaw, bytesToHex, AFTER_END_S, parse } from "./decode.js";
+// Served by the Python logger instead, it leaves the PM5 and the saving to the logger and
+// follows the logger's events (logger-feed.js).
+import { Session, readRaw, AFTER_END_S, parse } from "./decode.js";
 import * as C from "./csafe.js";
 import * as V from "./vo2.js";
 import * as BLE from "./ble.js";
@@ -10,9 +12,12 @@ import * as G from "./guided.js";
 import { GuidedUI } from "./guided-ui.js";
 import * as Wake from "./wake.js";
 import * as Fit from "./fit.js";
+import * as P from "./progress.js";
+import * as Logger from "./logger-feed.js";
+import { Recorder, rebuild } from "./recorder.js";
 
 const $ = id => document.getElementById(id);
-const state = { pm: null, session: null, raw: [], meta: {}, endTimer: null, sample: false, named: {}, lastSaved: null };
+const state = { pm: null, endTimer: null, sample: false, named: {}, lastSaved: null, logger: null, unsaved: new Map() };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 function stamp(d = new Date()) {
@@ -22,59 +27,90 @@ function stamp(d = new Date()) {
 function setConn(text, cls = "") { $("conn").textContent = text; $("conn").className = cls; }
 const emit = (kind, data) => { (H[kind] || (() => {}))(data); if (!state.sample) guided.onEvent(kind, data); render(); };
 
-// ---------- a session per piece ----------
-function startSession() {
-  state.session = new Session(emit);
-  state.raw = [];
-  state.meta = { started: stamp(), device: state.pm ? state.pm.info : undefined, workout: state.meta.workout };
-  H.reset({});
-  if (state.pm) H.device({ ...state.pm.info, workout: state.meta.workout });
-  render();
-}
+// ---------- a session per piece (recorder.js does the recording and saving) ----------
+const rec = new Recorder({ store: DB, stamp, emit, fatigue: d => withFatigue(d),
+  onStart: meta => { H.reset({}); if (state.pm) H.device({ ...state.pm.info, workout: meta.workout }); render(); } });
+const recording = () => !!(rec.session && rec.session.strokes.size);
 
 function onPacket(t, short, b) {
   if (short === 0x003b) { const p = parse(short, b); if (p && p.hrm_id) rememberHrm({ mfg: p.hrm_mfg, type: p.hrm_type, id: p.hrm_id }, "paired with"); }
-  const line = { t: Math.round(t * 1000) / 1000, uuid: short.toString(16).padStart(4, "0"), hex: bytesToHex(b) };
-  if (!state.session) {                 // between pieces: keep showing the last one until the next stroke arrives
-    if (short !== 0x0035) return;
-    startSession();
+  const { finishing } = rec.packet(t, short, b);
+  if (finishing) {                      // the PM5 started a new piece: the recorder is saving the old one and recording the new
+    clearTimeout(state.endTimer); state.endTimer = null;
+    finishing.then(out => afterSave(out, "a new piece started on the PM5"));
   }
-  const s = state.session;
-  s.feed(t, short, b);
-  if (s.newPieceAt !== null) {          // the PM5 started a new piece: save this one and give the new one that stroke
-    finish("a new piece started on the PM5").then(() => { startSession(); state.raw.push(line); state.session.feed(t, short, b); });
-    return;
-  }
-  state.raw.push(line);
-  if (s.endAt !== null && !state.endTimer) {
+  if (rec.session && rec.session.endAt !== null && !state.endTimer) {
     setConn(`piece ended on the PM5; saving in ${AFTER_END_S} s (it re-sends its summary with the recovery heart rate)`, "live");
-    state.endTimer = setTimeout(() => finish("the piece ended on the PM5"), AFTER_END_S * 1000);
+    state.endTimer = setTimeout(() => saveRow("the piece ended on the PM5"), AFTER_END_S * 1000);
   }
 }
 
-/** Save the current session (if it has strokes) and leave the dashboard showing it. */
-async function finish(reason) {
-  clearTimeout(state.endTimer); state.endTimer = null;
-  const s = state.session;
-  state.session = null;
-  if (!s || !s.strokes.size || state.sample) return;
-  const data = s.result(state.meta);
-  // when peak position started drifting later, if it did: saved with every row
+/** When peak position started drifting later, if it did: saved with every row. */
+function withFatigue(data) {
   data.fatigue = G.fatigueOnset(data.strokes.map(st => { const c = st.force_curve_v2 || st.force_curve, m = c ? metrics(c) : null; return { t: st.elapsed_s, a100: m ? m.a100 : null }; }));
-  const head = { t: state.raw.length ? state.raw[0].t : Math.round(Date.now() / 1000), device: state.meta.device || null, workout: state.meta.workout || null };
-  try {
-    await DB.putSession(data);
-    await DB.putRaw(state.meta.started, [head, ...state.raw]);
-    state.lastSaved = state.meta.started;
-    H.ended({ session: state.meta.started });
+  return data;
+}
+
+/** Save the current piece (if it has strokes) and leave the dashboard showing it. */
+async function saveRow(reason) {
+  clearTimeout(state.endTimer); state.endTimer = null;
+  afterSave(await rec.finish(), reason);
+}
+
+/** Report a save. What was not written stays in memory, with buttons to download it. */
+function afterSave(out, reason) {
+  if (!out) return;
+  const { id, data } = out;
+  if (out.saved !== "none") state.lastSaved = id;
+  if (out.saved === "all") {
+    H.ended({ session: id });
     if (data.fatigue && data.fatigue.onset_s != null) $("banner").textContent += ` · peak position drifted later from ${G.fmtClock(data.fatigue.onset_s)}`;
-    setConn(`${reason}; saved ${data.strokes.length} strokes as ${state.meta.started}`, state.pm && state.pm.connected ? "live" : "");
-  } catch (e) {
-    setConn(`${reason}; saving failed (${e.message}). Download it now from the table below before leaving the page.`, "err");
-    $("banner").textContent = "not saved";
+    setConn(`${reason}; saved ${data.strokes.length} strokes as ${id}`, state.pm && state.pm.connected ? "live" : "");
+  } else {
+    state.unsaved.set(id, { ...out, need: new Set(out.saved === "session" ? ["raw"] : ["json", "raw"]) });
+    showUnsaved();
+    setConn(`${reason}; saving ${id} failed: download it from the box above`, "err");
+    $("banner").textContent = out.saved === "session" ? "raw log not saved" : "not saved";
   }
-  showFitness([[state.meta.started, data]]);
+  showFitness([[id, data]]);
   refreshSessions();
+}
+
+function showUnsaved() {
+  const box = $("unsaved");
+  box.replaceChildren(); box.hidden = !state.unsaved.size;
+  for (const [id, u] of state.unsaved) {
+    const p = box.appendChild(document.createElement("div"));
+    p.textContent = u.saved === "session"
+      ? `${id} was saved in this browser, but its raw log was not (${u.error.message}). Download the raw log before leaving the page: `
+      : `${id} could not be saved in this browser (${u.error.message}). Download it before leaving the page, or it is lost: `;
+    for (const kind of u.need) {
+      const b = p.appendChild(document.createElement("button"));
+      b.textContent = kind === "json" ? "session JSON" : "raw log";
+      b.addEventListener("click", () => {
+        if (kind === "json") DB.download(`${id}.json`, JSON.stringify(u.data, null, 1));
+        else DB.download(`${id}.jsonl`, u.lines.map(l => JSON.stringify(l)).join("\n") + "\n", "application/x-ndjson");
+        u.need.delete(kind); if (!u.need.size) state.unsaved.delete(id);
+        showUnsaved();
+      });
+    }
+  }
+}
+
+/** A raw log with no session beside it is a row the page never finished: the tab was closed or
+ *  killed mid-row. Rebuild it from its last checkpoint. (Were another tab still recording it, which
+ *  the PM5's single connection all but rules out, that tab's own save would replace this copy.) */
+async function recoverUnfinished() {
+  try {
+    const have = new Set((await DB.listSessions()).map(s => s.started)), found = [];
+    for (const id of await DB.listRawIds()) {
+      if (have.has(id)) continue;
+      const r = await DB.getRaw(id), lines = r ? r.lines : [];
+      const data = rebuild(id, lines, { recovered: true, fatigue: withFatigue });
+      if (data) { await DB.putSession(data); found.push(`${id} (${data.strokes.length} strokes)`); }
+    }
+    if (found.length) { setConn(`recovered ${found.join(", ")} from a row that was not finished; the last minute or so may be missing`); refreshSessions(); }
+  } catch { /* no storage: nothing to recover */ }
 }
 
 // ---------- Bluetooth ----------
@@ -91,23 +127,25 @@ async function connect() {
     return;
   }
   $("intro").hidden = true; $("stop").hidden = false; $("wo_send").disabled = !state.pm.control; $("wo_clear").disabled = !state.pm.control;
-  state.meta.workout = undefined;
-  startSession();
+  rec.device = state.pm.info; rec.workout = undefined;
+  rec.start();
   updateWake();
   syncHeartRateMonitor();
   setConn(`live: ${state.pm.info.name}${state.pm.info.firmware_rev ? ", firmware " + state.pm.info.firmware_rev : ""}. Row when ready; end the piece on the PM5 (Menu)`, "live");
 }
 
 async function onDisconnected() {
-  if (state.session && state.session.strokes.size) await finish("the PM5 disconnected");
-  else setConn("the PM5 disconnected");
+  if (recording()) await saveRow("the PM5 disconnected");
+  else if (!state.stopping) setConn("the PM5 disconnected");   // after Stop, the line keeps what the save said
+  state.stopping = false;
   state.pm = null;
   updateWake();
   $("connect").disabled = false; $("stop").hidden = true; $("wo_send").disabled = true; $("wo_clear").disabled = true;
 }
 
 async function stop() {
-  if (state.session && state.session.strokes.size) await finish("stopped");
+  state.stopping = recording();       // a save to report, which the disconnect then leaves on the line
+  if (state.stopping) await saveRow("stopped");
   if (state.pm) state.pm.disconnect();   // onDisconnected does the rest
 }
 
@@ -151,6 +189,7 @@ async function loadWorkouts() {
 }
 async function program(specText) {
   const st = $("wo_status"); st.className = "";
+  if (state.logger) return programThroughLogger(specText);
   if (!state.pm) { st.className = "err"; st.textContent = "connect to the PM5 first"; return; }
   try {
     let frame, desc = null;
@@ -158,8 +197,7 @@ async function program(specText) {
     else { const spec = C.parseSpec(specText, state.named); frame = C.build(spec); desc = C.describe(spec); st.textContent = "sending to the PM5…"; }
     const [status] = await state.pm.send(frame);
     if (status & 0x30) throw new Error(`the PM5 did not accept it (${C.describeStatus(status)}); is it on the main menu?`);
-    state.meta.workout = desc || undefined;
-    state.raw.push({ t: Math.round(Date.now() / 1000), workout: desc });
+    rec.setWorkout(desc);
     H.device({ ...state.pm.info, workout: desc });
     st.className = "ok"; st.textContent = desc ? `PM5 set: ${desc}. Row when ready.` : "cleared";
   } catch (e) { st.className = "err"; st.textContent = e.message; }
@@ -171,25 +209,23 @@ $("wo_clear").addEventListener("click", () => program(null));
 
 // ---------- replay: the built-in sample, or a raw log you saved ----------
 async function playRaw(text, label, speed = 2) {
-  if (state.pm || state.sample) return;
+  if (state.pm || state.sample || state.logger) return;
   $("sample").disabled = true;
-  let mine = null;
   try {
-    const { meta, events } = readRaw(text);
-    state.sample = true; state.session = new Session(emit); state.meta = { started: "replay", ...meta };
-    mine = state.session;
+    const { meta, events } = readRaw(text), session = new Session(emit);   // a replay is shown, never recorded
+    state.sample = true;
     H.reset({ replay: `${label} (at ${speed}x)` }); if (meta.device) H.device(meta.device); render();
     $("intro").hidden = true; setConn(`replaying ${label}`);
     let prev = events.length ? events[0][0] : 0;
     for (const [t, short, b] of events) {
       if (!state.sample) return;
       await sleep(Math.max(0, (t - prev) / speed * 1000)); prev = t;
-      state.session.feed(t, short, b);
+      session.feed(t, short, b);
     }
-    showFitness([[label, state.session.result(state.meta)]]);
+    showFitness([[label, session.result({ started: "replay", ...meta })]]);
     setConn(`${label} finished (a replay is not saved)`); $("banner").textContent = "a replay is not saved";
   } catch (e) { setConn(`could not replay: ${e.message}`, "err"); }
-  finally { state.sample = false; if (state.session === mine) state.session = null; $("sample").disabled = false; }   // a connect during a replay owns the session now
+  finally { state.sample = false; $("sample").disabled = false; }
 }
 const playSample = async () => playRaw(await (await fetch("examples/sample_row.jsonl")).text(), "the sample row (synthetic)");
 $("replayfile").addEventListener("change", async e => {
@@ -225,6 +261,12 @@ function showFitness(sessions) {
     const cfg = fitnessCfg();
     $("fit_out").textContent = cfg ? `saved: ${cfg.mass_kg} kg, HRmax ${cfg.hrmax}, resting ${cfg.hr_rest}, watts reported at ${cfg.zone_hr} bpm${cfg.notes.length ? "\n" + cfg.notes.map(n => "note: " + n).join("\n") : ""}` : "mass and maximum heart rate are both needed";
   });
+  $("fit_progress").addEventListener("click", async () => {
+    let all;
+    try { all = await DB.listSessions(); } catch { $("fit_out").textContent = "this browser refused storage (private window?)"; return; }
+    const env = fitnessEnv(), num = k => { const v = parseFloat(env[k]); return v > 0 ? v : null; };
+    $("fit_out").textContent = P.progressReport(P.progress(all, { ceiling: num("PM5_ZONE_HR"), hr_rest: num("PM5_HR_REST") }));
+  });
   $("fit_all").addEventListener("click", async () => {
     const all = (await DB.listSessions()).sort((a, b) => a.started.localeCompare(b.started));
     if (!all.length) { $("fit_out").textContent = "no saved rows yet"; return; }
@@ -239,21 +281,65 @@ async function refreshSessions() {
   let all;
   try { all = (await DB.listSessions()).sort((a, b) => b.started.localeCompare(a.started)); } catch { $("sessions_list").textContent = "this browser refused storage (private window?)"; return; }
   if (!all.length) { $("sessions_list").textContent = "none yet"; return; }
-  const rows = all.map(s => {
+  // built from elements, not HTML text: a row's name came from a file and is only ever text here
+  const el = (tag, text) => { const e = document.createElement(tag); if (text != null) e.textContent = text; return e; };
+  const table = el("table"), head = table.appendChild(el("thead")).appendChild(el("tr")), body = table.appendChild(el("tbody"));
+  for (const h of ["Started", "Distance", "Time", "Strokes", ""]) head.appendChild(el("th", h));
+  for (const s of all) {
     const sm = s.summary || {}, last = s.strokes[s.strokes.length - 1] || {};
     const dist = sm.distance_m ?? last.distance_m, time = sm.elapsed_s ?? last.elapsed_s;
-    return `<tr><td>${s.started}</td><td>${dist != null ? Math.round(dist) + " m" : "—"}</td><td>${time != null ? fmt(time) : "—"}</td><td>${s.strokes.length}</td>
-      <td><button data-act="view" data-id="${s.started}">view</button><button data-act="json" data-id="${s.started}">session JSON</button><button data-act="fit" data-id="${s.started}">FIT</button><button data-act="raw" data-id="${s.started}">raw log</button><button data-act="del" data-id="${s.started}">delete</button></td></tr>`;
-  });
-  $("sessions_list").innerHTML = `<table><thead><tr><th>Started</th><th>Distance</th><th>Time</th><th>Strokes</th><th></th></tr></thead><tbody>${rows.join("")}</tbody></table>`;
+    const tr = body.appendChild(el("tr"));
+    for (const v of [s.started, dist != null ? Math.round(dist) + " m" : "—", time != null ? fmt(time) : "—", s.strokes.length]) tr.appendChild(el("td", v));
+    const cell = tr.appendChild(el("td"));
+    for (const [act, label] of [["view", "view"], ["json", "session JSON"], ["fit", "FIT"], ["raw", "raw log"], ["del", "delete"]]) {
+      const b = cell.appendChild(el("button", label)); b.dataset.act = act; b.dataset.id = s.started;
+    }
+  }
+  $("sessions_list").replaceChildren(table);
 }
+// Rows recorded elsewhere (a phone, or the Python logger) come in as the files they were saved
+// as: a session JSON as it is, and a raw log under its row's name, rebuilt into a session when
+// no session file came with it. Browsers add " (1)" to a repeated download; that is dropped.
+async function importFiles(files) {
+  const note = $("import_status"), done = [], failed = [];
+  const order = [...files].sort((a, b) => /\.jsonl$/i.test(a.name) - /\.jsonl$/i.test(b.name));   // sessions before raw logs
+  for (const f of order) {
+    try {
+      const text = await f.text();
+      if (/\.jsonl$/i.test(f.name)) {
+        const lines = text.split("\n").filter(l => l.trim()).map(l => JSON.parse(l));
+        const name = f.name.replace(/\.jsonl$/i, "").replace(/\s*\(\d+\)$/, "");
+        const started = DB.isRowId(name) ? name : lines.length && lines[0].t ? stamp(new Date(lines[0].t * 1000)) : null;
+        if (!started) throw new Error("not a raw log");
+        await DB.putRaw(started, lines);
+        if (!(await DB.getSession(started))) {
+          const data = rebuild(started, lines, { fatigue: withFatigue });
+          if (!data) throw new Error("no strokes in it");
+          await DB.putSession(data);
+        }
+        done.push(started);
+      } else {
+        const s = JSON.parse(text);
+        if (!s || !Array.isArray(s.strokes)) throw new Error("not a session file");
+        if (!DB.isRowId(s.started)) throw new Error("its \"started\" is not a row's start time");
+        await DB.putSession(s);
+        done.push(s.started);
+      }
+    } catch (e) { failed.push(`${f.name} (${e.message})`); }
+  }
+  const rows = [...new Set(done)];
+  note.textContent = [rows.length ? `added ${rows.length === 1 ? "the row" : rows.length + " rows"} ${rows.join(", ")}` : "",
+    failed.length ? `could not read ${failed.join(", ")}` : ""].filter(Boolean).join("; ");
+  refreshSessions();
+}
+$("importfiles").addEventListener("change", e => { const f = e.target.files; if (f && f.length) importFiles(f); e.target.value = ""; });
 const fmt = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 $("sessions_list").addEventListener("click", async e => {
   const b = e.target.closest("button"); if (!b) return;
   const id = b.dataset.id, act = b.dataset.act;
   if (act === "view") {
     const s = await DB.getSession(id);
-    if (state.session || state.sample) { $("banner").textContent = "stop the current row first"; return; }
+    if (rec.session || state.sample) { $("banner").textContent = "stop the current row first"; return; }
     const sm = s.summary || {}, last = s.strokes[s.strokes.length - 1] || {};   // the status the PM5 left is the reset screen, so show the piece's totals
     const status = { elapsed_s: sm.elapsed_s ?? last.elapsed_s, distance_m: sm.distance_m ?? last.distance_m, avg_pace_s: sm.avg_pace_s, pace_s: last.pace_s,
       stroke_rate: sm.avg_stroke_rate ?? last.spm, hr: last.hr, drag_factor: sm.drag_factor_avg, calories_total: sm.calories_total, avg_power_w: sm.avg_watts, workout_type: sm.workout_type };
@@ -277,22 +363,71 @@ $("sessions_list").addEventListener("click", async e => {
 const WAKE_TEXT = { on: "screen kept awake", paused: "", off: "", refused: "the browser won't keep the screen awake" };
 Wake.onStatus(st => { $("wake").textContent = WAKE_TEXT[st] ?? ""; });
 let guidedRunning = false;
-function updateWake() { Wake.keepAwake(!!(state.pm && state.pm.connected) || guidedRunning); }
+const loggerLive = () => !!(state.logger && state.logger.open && !state.logger.replay);
+function updateWake() { Wake.keepAwake(!!(state.pm && state.pm.connected) || loggerLive() || guidedRunning); }
 
-const guided = new GuidedUI({ $, H, S, render, metrics, DB, isConnected: () => !!(state.pm && state.pm.connected),
-  onRunning: running => { guidedRunning = running; updateWake(); },
+const guided = new GuidedUI({ $, H, S, render, metrics, DB, isConnected: () => !!(state.pm && state.pm.connected) || loggerLive(),
+  onRunning: running => {
+    guidedRunning = running; updateWake();
+    // on a phone the session's instructions sit below the numbers: bring them on screen
+    if (running && matchMedia("(max-width: 640px)").matches) requestAnimationFrame(() => $("g_live").scrollIntoView({ block: "start", behavior: "smooth" }));
+  },
   onResult: async result => {   // the report goes into the row's session file
-    if (state.session && state.session.strokes.size) { state.meta.guided = result; return; }
+    if (state.logger) {
+      try { await Logger.saveGuided(result); }
+      catch (e) { $("g_out").textContent += `\n\nThe logger did not keep this report (${e.message}); copy it from here.`; }
+      return;
+    }
+    if (recording()) { rec.meta.guided = result; return; }
     if (!state.lastSaved) return;
     try { const s = await DB.getSession(state.lastSaved); if (s) { s.guided = result; await DB.putSession(s); } } catch { /* the report is still on the page */ }
   } });
+
+// ---------- served by the Python logger: it records, the page shows ----------
+// The logger holds the Bluetooth connection and writes the files, so the page hides what it
+// would otherwise do itself (connect, replay, keep rows) and feeds the logger's events to emit.
+// A guided session's report goes to the logger for the session file, and the readiness check
+// reads earlier ones from the logger's saved rows. A replay has no row to keep one in.
+function useLogger(info) {
+  state.logger = { ...info, open: false };
+  const hide = ["intro", "connect", "stop", "sample", "sessions", "fit_all", "fit_progress", ...(info.replay ? ["guided"] : [])];
+  for (const id of hide) $(id).style.display = "none";
+  $("replayfile").parentElement.style.display = "none";
+  for (const id of ["guided", "sessions"]) { const cb = hide.includes(id) && document.querySelector(`#ui_parts [data-part="${id}"]`); if (cb) (cb.closest("label") || cb).remove(); }
+  guided.DB = { listSessions: Logger.guidedSessions };
+  $("wo_send").disabled = $("wo_clear").disabled = !!info.replay;
+  Logger.workouts().then(list => {
+    for (const w of list) { const o = document.createElement("option"); o.value = w.name; o.textContent = `${w.name} · ${w.description}`; $("wo_named").appendChild(o); }
+  }).catch(() => { /* the page still works without the list */ });
+  Logger.follow((kind, data) => {
+    emit(kind, data);
+    if (kind === "new_piece") $("banner").textContent = "a new piece started on the PM5: the logger is saving this one; run it again for the next piece";
+    if (kind === "ended") {
+      $("banner").textContent = info.replay ? `replay of ${data.session} finished (a replay is not saved)` : `session ${data.session} saved by the logger`;
+      showFitness([[data.session, { strokes: [...S.strokes.values()].sort((a, b) => a.stroke_count - b.stroke_count), summary: S.summary, splits: [...S.splits.values()] }]]);
+    }
+  }, open => {
+    state.logger.open = open;
+    updateWake();
+    if (open) setConn(info.replay ? `replaying ${info.replay} from the logger` : "live: following the logger. Row when ready; end the piece on the PM5 (Menu)", "live");
+    else setConn("not connected: is the logger still running?", "err");
+  });
+}
+async function programThroughLogger(specText) {
+  const st = $("wo_status");
+  st.textContent = specText === null ? "clearing…" : "sending to the PM5…";
+  try {
+    const desc = await Logger.program(specText === null ? { terminate: true } : { spec: specText });
+    st.className = "ok"; st.textContent = desc ? `PM5 set: ${desc}. Row when ready.` : "cleared";
+  } catch (e) { st.className = "err"; st.textContent = e instanceof TypeError ? "the logger is not reachable" : e.message; }
+}
 
 // ---------- wiring ----------
 $("connect").addEventListener("click", connect);
 $("stop").addEventListener("click", stop);
 $("sample").addEventListener("click", playSample);
-window.addEventListener("beforeunload", e => { if (state.session && state.session.strokes.size && !state.sample) { e.preventDefault(); e.returnValue = ""; } });
+window.addEventListener("beforeunload", e => { if (recording() || state.unsaved.size) { e.preventDefault(); e.returnValue = ""; } });
 if (!BLE.supported()) { $("nobt").hidden = false; $("connect").disabled = true; setConn("no Web Bluetooth in this browser; use Chrome or Edge", "err"); }
-loadWorkouts();
-refreshSessions();
+const loggerInfo = Logger.detect();
+if (loggerInfo) useLogger(loggerInfo); else { loadWorkouts(); refreshSessions(); recoverUnfinished(); }
 render();

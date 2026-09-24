@@ -37,8 +37,10 @@ each curve's peak equals the peak force the PM5 reports for that stroke.
 """
 import argparse
 import asyncio
+import html
 import json
 import os
+import re
 import signal
 import sys
 import time
@@ -48,7 +50,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parent
-DASHBOARD = ROOT / "pm5_dashboard.html"
+WEB = ROOT / "web"         # the dashboard: the same page the browser version runs, fed from /events here
 OUT = ROOT / "data"
 PORT = 8750
 
@@ -61,7 +63,10 @@ IDLE_STOP_S = 600          # stop 10 min after the last stroke (the PM5 sends st
 AFTER_END_S = 75           # the PM5 re-sends its summary with recovery HR after 1 min of rest
 CURVE_MATCH_S = 3.0        # a force curve belongs to the stroke record within this many seconds
 MAX_BODY_BYTES = 64 * 1024  # the dashboard's own POST is a few dozen bytes; nothing larger is read
+HEAD_TIMEOUT_S = 10.0       # a request must arrive, headers and body, within this long
 LOCAL_NAMES = {"localhost", "127.0.0.1", "::1"}   # what Host and Origin may name
+WEB_TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
+             ".json": "application/json", ".png": "image/png"}   # what the page loads from web/
 
 WORKOUT_STATE = {0: "wait_to_begin", 1: "workout_row", 2: "countdown_pause", 3: "interval_rest",
                  4: "interval_work_time", 5: "interval_work_distance",
@@ -303,34 +308,69 @@ def content_length(header: bytes):
 
 
 def from_this_machine(host: bytes | None, origin: bytes | None) -> bool:
-    """Whether a request came from a page on this machine. The server listens on 127.0.0.1, but
-    a web page in the browser can still send it a request: a plain-text POST to /program needs no
-    permission from the server first, so without this check a page elsewhere could stop or change
-    the workout on the PM5. It could not read the reply, but the PM5 would act on it. Recent Chrome
-    already refuses to let public sites reach localhost (tested September 2026); this check does
-    not depend on the browser, and also covers pages served on other local ports. The Host header
-    shuts out DNS rebinding, where an outside name is pointed at 127.0.0.1 so that its pages count
-    as same-origin and could read /events, heart rate included. A missing Origin is fine (the
-    dashboard's own page loads, curl); a missing Host is not."""
-    def name(value, url):
+    """Whether a request came from the dashboard's own page, or from no page at all. The server
+    listens on 127.0.0.1, but a web page in the browser can still send it a request: a plain-text
+    POST to /program needs no permission from the server first, so without this check another page
+    could stop or change the workout on the PM5. It could not read the reply, but the PM5 would act
+    on it. Recent Chrome already refuses to let public sites reach localhost (tested September
+    2026); this check does not depend on the browser. An Origin must be this server itself: plain
+    http, a local name, and the port the Host names, so a page served on another local port is
+    refused too. The Host header shuts out DNS rebinding, where an outside name is pointed at
+    127.0.0.1 so that its pages count as same-origin and could read /events, heart rate included.
+    A missing Origin is fine (the dashboard's own GETs, curl); a missing Host is not."""
+    def parts(value, url):
         try:
-            return urlsplit(value.decode().strip() if url else "//" + value.decode().strip()).hostname
+            u = urlsplit(value.decode().strip() if url else "//" + value.decode().strip())
+            return u.scheme, u.hostname, u.port or 80
         except (UnicodeDecodeError, ValueError):
             return None
-    if host is None or name(host, False) not in LOCAL_NAMES:
+    h = parts(host, False) if host is not None else None
+    if not h or h[1] not in LOCAL_NAMES:
         return False
-    return origin is None or name(origin, True) in LOCAL_NAMES
+    if origin is None:
+        return True
+    o = parts(origin, True)
+    return bool(o) and o[0] == "http" and o[1] in LOCAL_NAMES and o[2] == h[2]
+
+
+def web_file(path: str) -> Path | None:
+    """The file in web/ a request path names, or None. Only top-level files of the types the page
+    loads: no subfolders, no dotfiles, so nothing else in the repository is reachable."""
+    name = "index.html" if path == "/" else path[1:]
+    if not re.fullmatch(r"\w[\w.-]*", name) or Path(name).suffix not in WEB_TYPES:
+        return None
+    f = WEB / name
+    return f if f.is_file() else None
+
+
+def saved_guided() -> list[dict]:
+    """The guided reports in the saved sessions, oldest first: [{"started", "guided"}]."""
+    out = []
+    for f in sorted((OUT / "sessions").glob("*.json")):
+        try:
+            g = json.loads(f.read_text()).get("guided")
+        except (OSError, ValueError, AttributeError):
+            continue
+        if g:
+            out.append({"started": f.stem, "guided": g})
+    return out
 
 
 class Hub:
     """Fan-out of dashboard events to every open browser tab (server-sent events), plus the
     small JSON API the dashboard uses to program the PM5: GET /workouts lists the named pieces,
     POST /program {"spec": "4x4:00/3:00r"} programs one (or {"terminate": true} clears it)
-    through the logger's own Bluetooth connection, so nothing has to be typed in a terminal."""
+    through the logger's own Bluetooth connection, so nothing has to be typed in a terminal.
+    POST /guided {"guided": report} keeps a guided session's report with the row, as the browser
+    version does, and GET /guided lists the saved rows' reports (the readiness check compares
+    against earlier ones).
+    The page itself is web/, the browser version, served with a pm5-logger meta tag that tells it
+    the logger is recording (or replaying `replay`), so it follows /events instead of Bluetooth."""
 
-    def __init__(self):
-        self.clients, self.session = set(), None
+    def __init__(self, replay: str | None = None):
+        self.clients, self.session, self.replay = set(), None, replay
         self.programmer = None   # async fn(spec text or None) -> description; set while a PM5 is connected
+        self.take_guided = None  # fn(report) that keeps a guided report with the row; set while recording
 
     def publish(self, kind, data):
         msg = f"data: {json.dumps({'kind': kind, 'data': data})}\n\n".encode()
@@ -364,29 +404,53 @@ class Hub:
         except (RuntimeError, TimeoutError) as e:
             return 502, {"error": str(e)}
 
+    def guided(self, body: bytes) -> tuple[int, dict]:
+        try:
+            report = json.loads(body or b"{}").get("guided")
+        except (json.JSONDecodeError, AttributeError):
+            return 400, {"error": "the request was not JSON"}
+        if not isinstance(report, dict):
+            return 400, {"error": "no guided report in the request"}
+        if not self.take_guided:
+            return 503, {"error": "no row is being recorded: this is a replay, or the logger has finished"}
+        self.take_guided(report)
+        return 200, {"ok": True}
+
     async def handle(self, reader, writer):
         try:
-            request = (await reader.readline()).split()
-            method = request[0].decode() if request else "GET"
-            path = request[1].decode() if len(request) > 1 else "/"
-            length, host, origin = 0, None, None
-            while (line := await reader.readline()) not in (b"\r\n", b"\n", b""):
-                key = line.split(b":", 1)[0].strip().lower()
-                if key == b"content-length":
-                    length = content_length(line)
-                elif key == b"host":
-                    host = line.split(b":", 1)[1]
-                elif key == b"origin":
-                    origin = line.split(b":", 1)[1]
-            if not from_this_machine(host, origin):
-                self._json(writer, 403, {"error": "this server only answers pages on this machine"})
+            head = await asyncio.wait_for(self._read_request(reader), HEAD_TIMEOUT_S)
+        except Exception:    # a request that never finished, a malformed one, or a dropped connection
+            writer.close()
+            return
+        await self._answer(writer, *head)
+
+    async def _read_request(self, reader):
+        request = (await reader.readline()).split()
+        method = request[0].decode() if request else "GET"
+        path = urlsplit(request[1].decode()).path if len(request) > 1 else "/"
+        length, host, origin = 0, None, None
+        while (line := await reader.readline()) not in (b"\r\n", b"\n", b""):
+            key = line.split(b":", 1)[0].strip().lower()
+            if key == b"content-length":
+                length = content_length(line)
+            elif key == b"host":
+                host = line.split(b":", 1)[1]
+            elif key == b"origin":
+                origin = line.split(b":", 1)[1]
+        ok = from_this_machine(host, origin)
+        body = await reader.readexactly(length) if ok and length else b""
+        return method, path, length, ok, body
+
+    async def _answer(self, writer, method, path, length, ok, body):
+        try:
+            if not ok:
+                self._json(writer, 403, {"error": "this server only answers the dashboard's own page"})
                 await writer.drain()
                 return
             if length is None:
                 self._json(writer, 400, {"error": f"the body must be at most {MAX_BODY_BYTES} bytes"})
                 await writer.drain()
                 return
-            body = await reader.readexactly(length) if length else b""
             if path.startswith("/events"):
                 writer.write(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n"
                              b"Cache-Control: no-cache\r\nConnection: keep-alive\r\n\r\n")
@@ -405,14 +469,24 @@ class Hub:
                 self._json(writer, 200, {"workouts": [{"name": n, "description": describe(w)}
                                                       for n, w in load_named().items()]})
                 await writer.drain()
+            elif path == "/guided":
+                if method == "POST":
+                    status, payload = self.guided(body)
+                else:
+                    status, payload = 200, {"sessions": saved_guided()}
+                self._json(writer, status, payload)
+                await writer.drain()
             elif path == "/program" and method == "POST":
                 status, payload = await self.program(body)
                 self._json(writer, status, payload)
                 await writer.drain()
-            elif path in ("/", "/index.html"):
-                page = DASHBOARD.read_bytes()
-                writer.write(b"HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n"
-                             b"Cache-Control: no-cache\r\nContent-Length: %d\r\n\r\n" % len(page) + page)
+            elif method == "GET" and (f := web_file(path)):
+                page = f.read_bytes()
+                if f.name == "index.html":
+                    mark = html.escape(json.dumps({"replay": self.replay}))
+                    page = page.replace(b"<head>", f'<head>\n<meta name="pm5-logger" content="{mark}">'.encode(), 1)
+                writer.write(f"HTTP/1.1 200 OK\r\nContent-Type: {WEB_TYPES[f.suffix]}\r\n"
+                             f"Cache-Control: no-cache\r\nContent-Length: {len(page)}\r\n\r\n".encode() + page)
                 await writer.drain()
             else:
                 writer.write(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n")
@@ -590,6 +664,17 @@ async def log_session(minutes: float | None, upload: bool = True, open_browser: 
                 hub.publish("device", {**meta["device"], "workout": desc})
                 return desc
             hub.programmer = programmer
+
+            def take_guided(report):
+                """A guided session finished on the dashboard: its report goes into the session file."""
+                meta["guided"] = report
+                if not raw.closed:     # in the raw log too, so a --reparse keeps it
+                    raw.write(json.dumps({"t": round(time.time(), 3), "guided": report}) + "\n")
+                elif sess_path.exists():   # the row has been saved already
+                    saved = json.loads(sess_path.read_text())
+                    saved["guided"] = report
+                    sess_path.write_text(json.dumps(saved, indent=1))
+            hub.take_guided = take_guided
             service = client.services.get_service(ROWING_SERVICE)
             if service is None:
                 sys.exit(f"{dev.name} does not offer the Concept2 rowing service; is it a PM5?")
@@ -622,7 +707,7 @@ async def log_session(minutes: float | None, upload: bool = True, open_browser: 
         hub.programmer = None
         raw.close()
     hub.publish("ended", {"session": start})
-    await asyncio.sleep(0.3)   # let the dashboard receive it before the server goes
+    await asyncio.sleep(0.3)   # let the dashboard receive it (and send a guided report) before the server goes
     data = session.result({"started": start, **{k: v for k, v in meta.items() if v is not None}})
     save(sess_path, data)
     fitness(sess_path, data)
@@ -644,6 +729,8 @@ def read_raw(raw_path):
                     meta["workout"] = r["workout"]
                 else:
                     meta.pop("workout", None)
+            if "guided" in r:            # a guided session's report, sent by the dashboard
+                meta["guided"] = r["guided"]
             if "uuid" in r:
                 events.append((r["t"], int(r["uuid"], 16), bytes.fromhex(r["hex"])))
     return meta, events
@@ -662,7 +749,7 @@ def reparse(raw_path: Path) -> None:
 async def replay(raw_path: Path, speed: float, loop: bool, open_browser: bool):
     """Play a saved row through the dashboard at its original pace (x speed). No Bluetooth."""
     meta, events = read_raw(raw_path)
-    hub, stop = Hub(), asyncio.Event()
+    hub, stop = Hub(replay=raw_path.stem), asyncio.Event()
     server = await start_dashboard(hub, open_browser)
     install_stop_signal(stop)
     await asyncio.sleep(2)  # let a freshly opened tab connect before the first stroke

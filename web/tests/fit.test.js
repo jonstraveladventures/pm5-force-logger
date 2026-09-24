@@ -151,6 +151,14 @@ test("the PM5's splits become laps, and a row without them becomes one", () => {
   assert.equal(read(encode(sample)).filter(m => m.global === 19).length, 1);
 });
 
+test("a stroke exactly on a split boundary is written once", () => {
+  const splits = [1, 2, 3].map(n => ({ split_number: n, split_time_s: 60, split_distance_m: 211, end_s: 60 * n }));
+  const k = sample.strokes.findIndex(s => s.elapsed_s > 60);
+  const strokes = sample.strokes.map((s, i) => i === k ? { ...s, elapsed_s: 60 } : s);   // lands on the end of lap one
+  const withLaps = of(read(encode({ ...sample, strokes, splits })), 20).length;
+  assert.equal(withLaps, of(read(encode({ ...sample, strokes })), 20).length, "no record is repeated in the next lap");
+});
+
 test("nonsense readings are left out rather than written", () => {
   // the monitor reports a pace of a second or two per 500 m either side of a piece
   const strokes = sample.strokes.map((s, i) => i === 0 ? { ...s, pace_s: 1.79 } : s);

@@ -20,6 +20,15 @@ const r0 = x => (x == null ? "—" : Math.round(x).toString());
 
 export const CONTROL_S = 20;          // the heart-rate-capped row re-steers the pace this often
 export const DEFAULT_REST = 60;       // resting heart rate when the fitness settings don't give one
+// What a rate or drag block needs before its heart rate counts: heart rate read for most of the
+// counted window, and the rower mostly on the target power (within 10%) and, in a rate test, rate
+// (within 1 stroke a minute). A block short of any of these is reported, and no setting is named.
+export const VALID = { hr_cover: 0.8, on_power: 0.6, on_rate: 0.6, power_tol: 0.1 };
+export const CLOSE_BPM = 1.5;         // below this, one session can't separate two settings
+// A readiness check is read against your usual only once there are this many earlier checks at
+// the same power; then a reading 4 bpm over it, an effort 2 points over your usual, or marked
+// soreness is called unusual: a prompt to look at the whole picture, not a verdict.
+export const MIN_BASELINE = 3, UNUSUAL_BPM = 4, UNUSUAL_RPE = 2;
 
 // ---------------------------------------------------------------------------- protocols
 
@@ -194,7 +203,7 @@ export class Engine {
     this.blocks = protocol.blocks.map(b => { const o = { ...b, start: at, end: at + b.s }; at += b.s; return o; });
     this.total = at;
     this.t0 = null; this.strokes = []; this.status = []; this.idx = -1; this.done = false; this.warned = new Set();
-    this.pace = null; this.lastCtl = null; this.spokenPace = null; this.lastWarn = -Infinity; this.controlLog = [];
+    this.pace = null; this.lastCtl = null; this.spokenPace = null; this.lastWarn = -Infinity; this.controlLog = []; this.hrLost = false;
     this.drill = { hits: 0, n: 0 };
   }
   get started() { return this.t0 !== null; }
@@ -233,8 +242,14 @@ export class Engine {
 
   _steer(b, rel) {
     this.lastCtl = rel;
-    const recent = this.status.filter(s => s.t > rel - CONTROL_S && s.hr).map(s => s.hr);
-    if (!recent.length) return [];
+    const win = this.status.filter(s => s.t > rel - CONTROL_S), recent = win.filter(s => s.hr).map(s => s.hr);
+    if (recent.length < win.length / 2) {   // heart rate lost for most of the window: hold the pace rather than steer on a stale reading
+      this.controlLog.push({ t: Math.round(rel), hr: null, pace_s: this.pace, held: true });
+      if (this.hrLost) return [];
+      this.hrLost = true;
+      return [cue(`Heart rate lost. Holding pace ${fmtPace(this.pace)}.`)];
+    }
+    this.hrLost = false;
     const hr = mean(recent), c = b.ceiling;
     // faster (lower pace) with headroom, hold near the ceiling, back off above it
     const d = hr > c ? 2 : hr < c - 6 ? -1 : hr < c - 3 ? -0.5 : 0;
@@ -287,29 +302,52 @@ const reached = (eng, b) => eng.status.length > 0 && eng.status[eng.status.lengt
  *  slips off the target pace don't pass for a difference between settings. */
 export const hrAdj = (hr, watts, targetW, rest = DEFAULT_REST) => rest + (hr - rest) * (targetW / watts);
 
+/** A rate test's or drag sweep's blocks, grouped by setting. Each block carries how much of its
+ *  counted window had heart rate, and how much was rowed on the target power and rate; `problems`
+ *  lists every block short of VALID. The verdict is "clear" only when every setting has both its
+ *  blocks valid and the lowest beats the next by more than CLOSE_BPM and by more than either
+ *  setting's two blocks disagree once the session's drift is taken off; "close" when the data are
+ *  good but the margin isn't; otherwise "inconclusive". `best` is the lowest whatever the verdict. */
 function grouped(eng, rest) {
-  const rows = eng.blocks.filter(b => b.role === "test" && reached(eng, b)).map(b => {
-    const [from, to] = windowOf(b), st = stats(eng.strokes, from, to);
-    if (!st) return null;
+  const tests = eng.blocks.filter(b => b.role === "test" && reached(eng, b)), visit = new Map(), problems = [];
+  const rows = tests.map(b => {
+    const [from, to] = windowOf(b), inWin = x => x.t >= from && x.t <= to;
+    const n = (visit.get(b.key) || 0) + 1; visit.set(b.key, n);
+    const status = eng.status.filter(inWin), strokes = eng.strokes.filter(s => inWin(s) && s.watts > 0);
     const targetW = b.pace_s ? wattsFromPace(b.pace_s) : b.watts;
-    const withRate = eng.strokes.filter(s => s.t >= from && s.t <= to && s.spm);
-    const drag = median(eng.status.filter(s => s.t >= from && s.t <= to && s.drag).map(s => s.drag));
-    return { key: b.key, mid: (from + to) / 2, ...st, target_w: targetW, adj_hr: hrAdj(st.hr, st.watts, targetW, rest),
-      on_rate: b.rate != null && withRate.length ? withRate.filter(s => Math.abs(s.spm - b.rate) <= 1).length / withRate.length : null, drag };
-  }).filter(Boolean);
-  const keys = [...new Set(rows.map(r => r.key))];
-  const groups = keys.map(k => {
-    const rs = rows.filter(r => r.key === k), adj = rs.map(r => r.adj_hr);
-    return { key: k, blocks: rs, adj_hr: mean(adj), spread: adj.length > 1 ? Math.max(...adj) - Math.min(...adj) : null,
-      watts: mean(rs.map(r => r.watts)), peak_lbf: mean(rs.map(r => r.peak_lbf).filter(v => v != null)), drag: median(rs.map(r => r.drag).filter(v => v != null)) };
+    const frac = (xs, ok) => (xs.length ? xs.filter(ok).length / xs.length : 0);
+    const hr_cover = frac(status, s => s.hr), on_power = frac(strokes, s => Math.abs(s.watts - targetW) <= VALID.power_tol * targetW);
+    const withRate = strokes.filter(s => s.spm), on_rate = b.rate != null ? frac(withRate, s => Math.abs(s.spm - b.rate) <= 1) : null;
+    const short = [];
+    if (hr_cover < VALID.hr_cover) short.push({ what: "hr", frac: hr_cover });
+    if (on_power < VALID.on_power) short.push({ what: "power", frac: on_power });
+    if (on_rate != null && on_rate < VALID.on_rate) short.push({ what: "rate", frac: on_rate });
+    for (const x of short) problems.push({ key: b.key, visit: n, ...x });
+    const st = stats(eng.strokes, from, to), drag = median(status.filter(s => s.drag).map(s => s.drag));
+    return { key: b.key, visit: n, mid: (from + to) / 2, ...(st || {}), target_w: targetW, adj_hr: st ? hrAdj(st.hr, st.watts, targetW, rest) : null,
+      hr_cover, on_power, on_rate, drag, valid: !short.length && !!st };
   });
-  const paired = groups.filter(g => g.blocks.length >= 2).map(g => {
-    const [a, b] = [g.blocks[0], g.blocks[g.blocks.length - 1]];
+  // the session's drift, from settings whose two blocks are both valid
+  const byKey = k => rows.filter(r => r.key === k), keys = [...new Set(rows.map(r => r.key))];
+  const paired = keys.map(byKey).filter(rs => rs.length >= 2 && rs.every(r => r.valid)).map(rs => {
+    const [a, b] = [rs[0], rs[rs.length - 1]];
     return (b.adj_hr - a.adj_hr) / ((b.mid - a.mid) / 60);
   });
-  const sorted = [...groups].sort((a, b) => a.adj_hr - b.adj_hr);
-  return { groups, best: sorted[0] ? sorted[0].key : null, margin: sorted.length > 1 ? sorted[1].adj_hr - sorted[0].adj_hr : null,
-    drift_bpm_min: paired.length ? mean(paired) : null };
+  const drift = paired.length ? mean(paired) : null;
+  const groups = keys.map(k => {
+    const rs = byKey(k), ok = rs.filter(r => r.valid), centre = mean(ok.map(r => r.mid));
+    const level = ok.map(r => r.adj_hr - (drift ?? 0) * (r.mid - centre) / 60);   // each block with the drift taken off
+    return { key: k, blocks: rs, complete: rs.length >= 2 && ok.length === rs.length, adj_hr: ok.length ? mean(ok.map(r => r.adj_hr)) : null,
+      spread: level.length > 1 && drift != null ? Math.max(...level) - Math.min(...level) : null,
+      watts: mean(rs.map(r => r.watts).filter(v => v != null)), peak_lbf: mean(rs.map(r => r.peak_lbf).filter(v => v != null)), drag: median(rs.map(r => r.drag).filter(v => v != null)) };
+  });
+  const sorted = groups.filter(g => g.adj_hr != null).sort((a, b) => a.adj_hr - b.adj_hr);
+  const margin = sorted.length > 1 ? sorted[1].adj_hr - sorted[0].adj_hr : null;
+  const noise = sorted.length > 1 ? Math.max(sorted[0].spread ?? 0, sorted[1].spread ?? 0) : null;
+  const unvisited = groups.filter(g => g.blocks.length < 2).map(g => g.key);
+  const verdict = problems.length || unvisited.length || !groups.every(g => g.complete) || margin == null ? "inconclusive"
+    : margin < CLOSE_BPM || margin <= noise ? "close" : "clear";
+  return { groups, best: sorted[0] ? sorted[0].key : null, margin, noise, verdict, problems, unvisited, drift_bpm_min: drift };
 }
 
 function recoveryOf(eng) {
@@ -327,9 +365,11 @@ function readinessOf(eng, ctx) {
   const [from, to] = windowOf(b), st = stats(eng.strokes, from, to);
   if (!st) return null;
   const adj = hrAdj(st.hr, st.watts, b.watts, ctx.hr_rest);
-  const history = (ctx.history || []).filter(h => Math.abs(h.target_w - b.watts) <= 5).map(h => h.adj_hr).slice(-10);
-  const usual = median(history);
-  return { target_w: b.watts, hr: st.hr, watts: st.watts, adj_hr: adj, usual, n_history: history.length, diff: usual == null ? null : adj - usual };
+  const same = (ctx.history || []).filter(h => Math.abs(h.target_w - b.watts) <= 5).slice(-10);
+  const usual = median(same.map(h => h.adj_hr)), rpes = same.map(h => h.rpe).filter(v => v != null);
+  // rpe (effort out of 10), soreness ("none", "a little", "a lot") and note are asked after the check
+  return { target_w: b.watts, hr: st.hr, watts: st.watts, adj_hr: adj, usual, n_history: same.length, diff: usual == null ? null : adj - usual,
+    usual_rpe: rpes.length ? median(rpes) : null, rpe: null, soreness: null, note: null };
 }
 
 function drillOf(eng) {
@@ -372,9 +412,10 @@ export function analyse(eng, ctx = {}) {
   if (k === "rate" || k === "drag") out.groups = grouped(eng, rest);
   if (k === "hrcap") {
     const b = eng.blocks.find(x => x.control === "hrcap"), c = b.ceiling;
-    const inBlock = eng.status.filter(s => s.t >= b.start && s.t <= b.end && s.hr);
+    const all = eng.status.filter(s => s.t >= b.start && s.t <= b.end), inBlock = all.filter(s => s.hr);
     const last = stats(eng.strokes, Math.max(b.start, b.end - 600), b.end);
     out.hrcap = { ceiling: c, over_frac: inBlock.length ? inBlock.filter(s => s.hr > c).length / inBlock.length : null,
+      missing_frac: all.length ? 1 - inBlock.length / all.length : null,
       last: last, watts_at_ceiling: last && last.hr - rest > 15 ? V.wattsAt(c, last.watts, last.hr, rest) : null,
       final_pace_s: eng.pace, control: eng.controlLog };
   }
@@ -413,17 +454,24 @@ export function report(r) {
   if (g) {
     const pace = r.params.pace_s, w = wattsFromPace(pace);
     L.push(`${r.title} (${Math.round(w)} W). Heart rate in the last ${Math.round(r.params.count_s / 60 * 10) / 10} minutes of each block, adjusted to ${Math.round(w)} W:`);
+    const shortName = k => (r.kind === "rate" ? `${k} s/m` : `damper ${k}`);
+    const pct = xs => `${r0(100 * Math.min(...xs))}%`;   // the weaker of a setting's blocks
     for (const x of g.groups) {
       const name = r.kind === "rate" ? `${x.key} s/m` : `damper ${x.key}${x.drag ? ` (drag ${Math.round(x.drag)})` : ""}`;
       const blocks = x.blocks.map(b => r1(b.adj_hr)).join(" and ");
-      const rate = r.kind === "rate" && x.blocks.some(b => b.on_rate != null) ? `, on rate ${r0(100 * mean(x.blocks.map(b => b.on_rate)))}%` : "";
-      L.push(`  ${name}: ${r1(x.adj_hr)} bpm (blocks ${blocks}${rate}), peak force ${r0(x.peak_lbf)} lbf`);
+      const rate = r.kind === "rate" && x.blocks.some(b => b.on_rate != null) ? `, on rate ${pct(x.blocks.map(b => b.on_rate ?? 0))}` : "";
+      L.push(`  ${name}: ${r1(x.adj_hr)} bpm (blocks ${blocks}${rate}, on power ${pct(x.blocks.map(b => b.on_power))}, heart rate ${pct(x.blocks.map(b => b.hr_cover))}), peak force ${r0(x.peak_lbf)} lbf`);
     }
-    if (g.best != null) {
-      const what = r.kind === "rate" ? `${g.best} strokes a minute` : `damper ${g.best}`;
-      L.push(g.margin != null && g.margin < 1.5
-        ? `Lowest: ${what}, but only ${r1(g.margin)} bpm below the next, which one session can't separate. Repeat on another day and compare.`
-        : `Lowest: ${what}, ${r1(g.margin)} bpm below the next best.`);
+    const what = g.best == null ? null : r.kind === "rate" ? `${g.best} strokes a minute` : `damper ${g.best}`;
+    if (g.verdict === "inconclusive") {
+      const WHAT = { hr: "heart rate read", power: "on the target power", rate: "at the target rate" };
+      const why = [...g.problems.map(x => `${shortName(x.key)}, ${x.visit === 1 ? "first" : "second"} block: ${WHAT[x.what]} for only ${r0(100 * x.frac)}% of it`),
+        ...g.unvisited.map(k => `${shortName(k)} was rowed once, not twice, so drift is not cancelled for it`)];
+      L.push(`No ${r.kind === "rate" ? "rate" : "damper setting"} is named: ${why.join("; ")}. Repeat the session to compare them.`);
+    } else if (g.verdict === "close") {
+      L.push(`Lowest: ${what}, but only ${r1(g.margin)} bpm below the next, ${g.margin < CLOSE_BPM ? "which" : `within the ${r1(g.noise)} bpm by which a setting's two blocks disagree, so`} one session can't separate them. Repeat on another day and compare.`);
+    } else if (g.verdict === "clear") {
+      L.push(`Lowest: ${what}, ${r1(g.margin)} bpm below the next best; each setting's two blocks agreed within ${r1(g.noise)} bpm once the drift is taken off.`);
     }
     if (g.drift_bpm_min != null) L.push(`Heart rate drifted about ${r1(g.drift_bpm_min)} bpm a minute; the order of the blocks cancels a steady drift.`);
   }
@@ -431,12 +479,18 @@ export function report(r) {
     const h = r.hrcap;
     if (h.last) L.push(`Capped at ${h.ceiling} bpm: over the last ${fmtClock(h.last.to - h.last.from)} you held ${r0(h.last.watts)} W at ${r1(h.last.hr)} bpm, ` +
       `above the ceiling ${r0(100 * (h.over_frac || 0))}% of the capped time. Final pace ${fmtPace(h.final_pace_s)}.`);
+    if (h.missing_frac > 0.05) L.push(`The heart rate was missing for ${r0(100 * h.missing_frac)}% of the capped time, and the pace was held then.`);
     if (h.watts_at_ceiling) L.push(`Watts at ${h.ceiling} bpm: ${r0(h.watts_at_ceiling)}.`);
   }
   if (r.drift) {
     const d = r.drift;
-    if (d.first && d.second) L.push(`Drift test: first half ${r0(d.first.watts)} W at ${r1(d.first.hr)} bpm, second half ${r0(d.second.watts)} W at ${r1(d.second.hr)} bpm. ` +
-      `Decoupling ${r1(d.decoupling_pct)}%${d.decoupling_pct < 5 ? ", under the 5% usually taken to mean the pace is sustainable" : ", above the 5% usually taken to mean the pace is sustainable"}.`);
+    if (d.first && d.second) {
+      const dw = 100 * (d.second.watts - d.first.watts) / d.first.watts;
+      L.push(`Drift test: first half ${r0(d.first.watts)} W at ${r1(d.first.hr)} bpm, second half ${r0(d.second.watts)} W at ${r1(d.second.hr)} bpm. ` +
+        `Decoupling ${r1(d.decoupling_pct)}%: power per heartbeat ${d.decoupling_pct >= 0 ? "fell" : "rose"} ${r1(Math.abs(d.decoupling_pct))}% from the first half to the second.` +
+        (Math.abs(dw) > 3 ? ` Power itself changed by ${r1(dw)}% between the halves, which moves this figure too.` : "") +
+        " A common rule of thumb reads under 5% as a pace you can hold aerobically; it assumes a steady power, a full warm-up and ordinary conditions (heat, poor sleep or a recent illness all raise it).");
+    }
   }
   if (r.step) {
     for (const s of r.step.stages) L.push(`  stage at ${s.key} W: ${r0(s.watts)} W, ${r1(s.hr)} bpm`);
@@ -452,10 +506,17 @@ export function report(r) {
     L.push(`Drill, ${text}: ${r0(100 * (d.drill_blocks.mean ?? 0))}% of strokes in the drill blocks, against ${r0(100 * (d.easy_blocks.mean ?? 0))}% in the easy blocks.`);
   }
   if (r.readiness) {
-    const x = r.readiness;
-    L.push(`Readiness: ${r1(x.hr)} bpm at ${r0(x.watts)} W, ${r1(x.adj_hr)} adjusted to ${x.target_w} W. ` +
-      (x.usual == null ? "This is the first readiness check; later ones will compare against it."
-        : `Your usual is ${r1(x.usual)} (median of ${x.n_history}); today is ${r1(Math.abs(x.diff))} ${x.diff >= 0 ? "above" : "below"} it${x.diff >= 4 ? ", which can mean fatigue or illness" : ""}.`));
+    const x = r.readiness, based = x.n_history >= MIN_BASELINE;
+    let line = `Readiness: ${r1(x.hr)} bpm at ${r0(x.watts)} W, ${r1(x.adj_hr)} adjusted to ${x.target_w} W. `;
+    line += based ? `Your usual is ${r1(x.usual)} (median of ${x.n_history}); today is ${r1(Math.abs(x.diff))} ${x.diff >= 0 ? "above" : "below"} it.`
+      : `Your usual is set once there are ${MIN_BASELINE} earlier checks; this is check ${x.n_history + 1}.`;
+    if (x.rpe != null) line += ` Effort ${x.rpe}/10${x.usual_rpe != null ? ` (usually ${r1(x.usual_rpe)})` : ""}.`;
+    if (x.soreness) line += ` Soreness or feeling unwell: ${x.soreness}.`;
+    if (x.note) line += ` Note: ${x.note}.`;
+    const unusual = based && (x.diff >= UNUSUAL_BPM || (x.rpe != null && x.usual_rpe != null && x.rpe - x.usual_rpe >= UNUSUAL_RPE)), sore = x.soreness === "a lot";
+    if (unusual) line += " That is unusual for you.";
+    if (unusual || sore) line += ` ${unusual ? "It" : "Marked soreness or feeling unwell"} is a prompt to weigh sleep, illness, soreness and recent training together before a hard session, not a verdict on its own.`;
+    L.push(line);
   }
   if (r.recovery) L.push(`Recovery: ${r0(r.recovery.start_hr)} to ${r0(r.recovery.end_hr)} bpm in one minute, a drop of ${r0(r.recovery.drop)}.`);
   if (r.fatigue) L.push(r.fatigue.onset_s != null
@@ -514,7 +575,7 @@ export const PROTOCOLS = {
     about: "The same palindrome across damper settings. You move the damper when told; the monitor measures the drag factor." },
   readiness: { title: "Readiness check", build: p => readinessCheck({ watts: p.watts }),
     fields: [["watts", "watts", 120, "num"]],
-    about: "Five easy minutes at a fixed power. Heart rate well above your usual can mean fatigue or illness. Tick the box to use it as any session's warm-up." },
+    about: "Five easy minutes at a fixed power, compared with your usual once there are three earlier checks, and afterwards a question on how hard it felt and any soreness. An unusual reading is a prompt to look at sleep, illness and recent training, not a verdict. Tick the box to use it as any session's warm-up." },
   drill: { title: "Technique drill", build: p => drillSession({ drill: p.drill, target: p.target === "" || p.target == null ? null : p.target, repeats: p.repeats, total_s: p.total * 60 }),
     fields: [["drill", "drill", "peak", "choice:peak=peak position,ratio=drive : recovery,consistency=consistency"], ["target", "target (blank for default)", "", "num"], ["repeats", "repeats", 3, "num"], ["total", "total (min)", 20, "num"]],
     about: "Three-minute drill blocks with easy rowing between. Every ten drill strokes you hear how many hit the target." },
