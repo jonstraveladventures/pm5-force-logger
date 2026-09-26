@@ -15,6 +15,7 @@ import * as Fit from "./fit.js";
 import * as P from "./progress.js";
 import * as Logger from "./logger-feed.js";
 import { Recorder, rebuild } from "./recorder.js";
+import * as Count from "./count.js";
 
 const $ = id => document.getElementById(id);
 const state = { pm: null, endTimer: null, sample: false, named: {}, lastSaved: null, logger: null, unsaved: new Map() };
@@ -58,10 +59,13 @@ async function saveRow(reason) {
 }
 
 /** Report a save. What was not written stays in memory, with buttons to download it. */
+const announceFinished = detail => window.dispatchEvent(new CustomEvent("pm5:finished", { detail }));
+
 function afterSave(out, reason) {
   if (!out) return;
   const { id, data } = out;
-  if (out.saved !== "none") state.lastSaved = id;
+  announceFinished({ id, data, saved: out.saved });
+  if (out.saved !== "none") { state.lastSaved = id; Count.event("row-saved"); }
   if (out.saved === "all") {
     H.ended({ session: id });
     if (data.fatigue && data.fatigue.onset_s != null) $("banner").textContent += ` · peak position drifted later from ${G.fmtClock(data.fatigue.onset_s)}`;
@@ -121,6 +125,7 @@ async function connect() {
   try {
     setConn("choose your PM5 in the browser's list…");
     state.pm = await BLE.connect({ onNotify: onPacket, onDisconnect: onDisconnected, log: msg => setConn(msg) });
+    Count.event("connected");
   } catch (e) {
     state.pm = null; $("connect").disabled = false;
     setConn(e.name === "NotFoundError" ? "no PM5 chosen" : `could not connect: ${e.message}`, e.name === "NotFoundError" ? "" : "err");
@@ -222,7 +227,9 @@ async function playRaw(text, label, speed = 2) {
       await sleep(Math.max(0, (t - prev) / speed * 1000)); prev = t;
       session.feed(t, short, b);
     }
-    showFitness([[label, session.result({ started: "replay", ...meta })]]);
+    const data = session.result({ started: "replay", ...meta });
+    showFitness([[label, data]]);
+    announceFinished({ id: null, data, replay: label });
     setConn(`${label} finished (a replay is not saved)`); $("banner").textContent = "a replay is not saved";
   } catch (e) { setConn(`could not replay: ${e.message}`, "err"); }
   finally { state.sample = false; $("sample").disabled = false; }
@@ -404,7 +411,9 @@ function useLogger(info) {
     if (kind === "new_piece") $("banner").textContent = "a new piece started on the PM5: the logger is saving this one; run it again for the next piece";
     if (kind === "ended") {
       $("banner").textContent = info.replay ? `replay of ${data.session} finished (a replay is not saved)` : `session ${data.session} saved by the logger`;
-      showFitness([[data.session, { strokes: [...S.strokes.values()].sort((a, b) => a.stroke_count - b.stroke_count), summary: S.summary, splits: [...S.splits.values()] }]]);
+      const row = { strokes: [...S.strokes.values()].sort((a, b) => a.stroke_count - b.stroke_count), summary: S.summary, splits: [...S.splits.values()] };
+      showFitness([[data.session, row]]);
+      announceFinished({ id: info.replay ? null : data.session, data: row, replay: info.replay || null, byLogger: true });
     }
   }, open => {
     state.logger.open = open;
@@ -428,6 +437,7 @@ $("stop").addEventListener("click", stop);
 $("sample").addEventListener("click", playSample);
 window.addEventListener("beforeunload", e => { if (recording() || state.unsaved.size) { e.preventDefault(); e.returnValue = ""; } });
 if (!BLE.supported()) { $("nobt").hidden = false; $("connect").disabled = true; setConn("no Web Bluetooth in this browser; use Chrome or Edge", "err"); }
+Count.start();
 const loggerInfo = Logger.detect();
 if (loggerInfo) useLogger(loggerInfo); else { loadWorkouts(); refreshSessions(); recoverUnfinished(); }
 render();

@@ -87,7 +87,7 @@ export function progress(sessions, { ceiling = null, hr_rest = null } = {}) {
 export function progressReport(p) {
   if (!p.groups.length) return "No piece has been rowed yet that the report can recognise: set a distance or a time on the monitor, and row it again to compare.";
   const L = [];
-  if (p.ceiling == null) L.push("Set your zone ceiling in the fitness settings to see the time spent above it and the watts you hold at it.");
+  if (p.ceiling == null) L.push("Set your easy-row ceiling in the settings to see the time spent above it and the watts you hold at it.");
   for (const g of p.groups) {
     L.push(`${g.name}, ${g.rows.length} row${g.rows.length === 1 ? "" : "s"}${p.ceiling != null ? ` (ceiling ${p.ceiling} bpm)` : ""}:`);
     for (const r of g.rows) {

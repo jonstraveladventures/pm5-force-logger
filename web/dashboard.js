@@ -235,6 +235,9 @@ function partGroups() {
     .map(([g, items]) => [g, items.filter(([id]) => $(id))]).filter(([, items]) => items.length);
 }
 const allParts = () => partGroups().flatMap(([, items]) => items);
+/** Every part the display can hide, and a way to set which are hidden (as the menu would, remembered). */
+export const partIds = () => allParts().map(([id]) => id);
+export function setHiddenParts(ids) { hidden.clear(); for (const id of ids) hidden.add(id); applyUI(); }
 
 function applyHidden() {
   for (const [id] of allParts()) $(id).classList.toggle("hidden-part", hidden.has(id));

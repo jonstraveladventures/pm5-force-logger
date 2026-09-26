@@ -59,7 +59,7 @@ test("a row that stopped short of its piece is listed but kept out of the trend"
 test("without a ceiling the report says how to set one, and still gives times and watts", () => {
   const rows = [0, 1].map(i => row({ started: week(i), seconds: 1300 - i, distance: 5000 }));
   const text = progressReport(progress(rows, { ceiling: null, hr_rest: null }));
-  assert.match(text, /set your zone ceiling/i);
+  assert.match(text, /set your easy-row ceiling/i);
   assert.match(text, /150 W/);
   assert.doesNotMatch(text, /above ceiling|W at|NaN|undefined|null/, "no figures that need a ceiling");
 });

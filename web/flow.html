@@ -143,14 +143,49 @@
   footer#contact { padding: 18px 20px 24px; font-size: .78rem; color: var(--ink3); text-align: center; }
   footer#contact a { color: var(--ink2); }
 </style>
+
+<style>
+  /* the screens: one shown at a time; the rowing screen uses the full width, the others read as a column */
+  .screen { padding: 8px 20px 24px; }
+  .screen:not(#screen_row) { max-width: 760px; margin: 0 auto; }
+  .screen[hidden] { display: none !important; }
+  #screen_row { padding: 0 0 20px; }
+  .card { background: var(--panel); border-radius: 12px; padding: 14px 16px; margin: 12px 0; }
+  .card h2 { margin: 0 0 10px; font-size: 1.05rem; }
+  .card .fields { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; font-size: .88rem; color: var(--ink2); }
+  .card .fields label { display: flex; flex-direction: column; gap: 3px; }
+  .card .fields input[type=number] { width: 7em; }
+  .choice { display: grid; gap: 8px; }
+  .choice label { display: flex; gap: 10px; align-items: baseline; padding: 10px 12px; border: 1px solid var(--grid); border-radius: 10px; cursor: pointer; }
+  .choice label:has(input:checked) { border-color: var(--s1); background: rgba(57,135,229,.08); }
+  .choice small { display: block; color: var(--ink3); font-size: .8rem; }
+  .big { font-size: 1.05rem; padding: 10px 18px; }
+  .actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 12px; }
+  #nav { display: flex; gap: 14px; margin-left: auto; font-size: .82rem; }
+  #nav a, header h1 a { color: var(--ink2); text-decoration: none; } header h1 a { color: var(--ink); }
+  #nav a.here { color: var(--ink); text-decoration: underline; }
+  #summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
+  #summary div { background: var(--surface); border-radius: 8px; padding: 8px 10px; }
+  #summary b { display: block; font-size: 1.4rem; font-variant-numeric: tabular-nums; }
+  #summary span { color: var(--ink3); font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; }
+  #flow_msg { color: var(--warn); font-size: .88rem; }
+  #flow_guided #g_start { display: none; }   /* "Start rowing" starts the session */
+  #screen_today #setup, #screen_today #guided { margin: 10px 0 0; padding: 0; background: none; }
+  #screen_row #g_live { margin: 8px 20px 0; background: var(--panel); border-radius: 10px; padding: 10px 14px; }
+  #screen_row .rowbar { display: flex; gap: 10px; padding: 6px 20px 0; }
+  #screen_done pre, #screen_history pre { white-space: pre-wrap; }
+  @media (max-width: 640px) {
+    .screen { padding: 6px 12px 20px; }
+    #screen_row #g_live { margin: 6px 12px 0; } #screen_row .rowbar { padding: 6px 12px 0; }
+    #nav { gap: 10px; }
+  }
+</style>
 </head>
 <body>
 <header>
-  <h1>PM5 force curves</h1>
-  <button id="connect" class="primary">Connect to PM5</button>
+  <h1><a href="#today" id="nav_home">PM5 force curves</a></h1>
+  <nav id="nav"><a href="#history">History</a><a href="#about" title="Your details and the display">Settings</a></nav>
   <button id="stop" hidden>Stop and save</button>
-  <button id="sample">Try the sample</button>
-  <label class="filebtn" title="Play back the raw log of a row you saved earlier">Replay a saved log<input type="file" id="replayfile" accept=".jsonl,application/x-ndjson" hidden></label>
   <span id="conn">not connected</span>
   <span id="wake" class="note" title="The page asks the browser to keep the screen on while you row"></span>
   <span id="battery" class="note"></span>
@@ -168,9 +203,41 @@
   </div><div class="parts" id="ui_parts"></div></details>
   <span id="banner"></span>
 </header>
-
 <div id="unsaved" hidden></div>
 
+<section class="screen" id="screen_about" hidden>
+  <div class="card">
+    <h2>About you</h2>
+    <p class="note">All of these are optional, and you can add them later from Settings. Mass and maximum heart rate give the fitness estimates. The easy-row ceiling is the heart rate you aim to stay under on easy rows, such as the top of zone 2; the reports use it for the watts you hold there and the time you spend above it. Nothing leaves this browser.</p>
+    <div class="fields">
+      <label>mass (kg) <input type="number" id="fit_mass" min="30" max="200" step="0.5"></label>
+      <label>max heart rate (optional) <input type="number" id="fit_hrmax" min="100" max="230"></label>
+      <label>resting heart rate (optional) <input type="number" id="fit_rest" min="30" max="120"></label>
+      <label title="The heart rate you aim to stay under on easy rows, such as the top of zone 2. The fitness report gives the watts you hold at it; the progress report, the time you spent above it.">easy-row ceiling, bpm (optional) <input type="number" id="fit_zone" min="60" max="220"></label>
+      <button id="fit_save" hidden>Save</button>
+    </div>
+  </div>
+  <div class="card">
+    <h2>What to show while you row</h2>
+    <div class="choice" id="flow_display">
+      <label><input type="radio" name="flow_display" value="minimal"><span>Minimal<small>Time, distance, pace, rate, heart rate and peak force, and the force curve</small></span></label>
+      <label><input type="radio" name="flow_display" value="standard"><span>Standard<small>Every tile, the force curve and its shape measures, and the trend charts</small></span></label>
+      <label><input type="radio" name="flow_display" value="everything"><span>Everything<small>All of that and the stroke-by-stroke table</small></span></label>
+    </div>
+    <p class="note">You can change any part of it later from "Change the display" while rowing.</p>
+  </div>
+  <div class="actions"><button id="flow_about_done" class="primary big">Continue</button></div>
+</section>
+
+<section class="screen" id="screen_today" hidden>
+  <div class="card">
+    <h2>Connect</h2>
+    <div class="actions" style="margin-top:0">
+  <button id="connect" class="primary">Connect to PM5</button>
+  <button id="sample">Try it with a sample row</button>
+  <label class="filebtn" title="Play back the raw log of a row you saved earlier">Replay a saved log<input type="file" id="replayfile" accept=".jsonl,application/x-ndjson" hidden></label>
+    </div>
+    <details style="margin-top:10px"><summary class="note">How it works</summary>
 <div id="intro">
   <p><b>Record a Concept2 PM5 from this page: every stroke's force curve, live, with nothing to install.</b> Rows are kept in this browser and leave it only as files you download. <span data-privacy>Nothing is sent anywhere.</span></p>
   <p id="nobt" class="warn" hidden>This browser cannot talk to Bluetooth devices. Open this page in Chrome or Edge (on a Mac, Windows PC, Chromebook or Android phone); Safari and Firefox don't offer Web Bluetooth.</p>
@@ -182,7 +249,16 @@
   <p class="note">Heart rate appears only when a belt or watch broadcast is paired with the PM5 itself.</p>
   <p class="note">This is a hobby project, not coaching or medical advice. The shape targets are guides from published rowing research, the fitness numbers are rough estimates, and rowing hard carries the usual risks, so row within your own limits and talk to a professional about your health. The software is offered as is, under the MIT licence, and its authors accept no liability for its use.</p>
 </div>
-
+    </details>
+  </div>
+  <div class="card">
+    <h2>Today's row</h2>
+    <div class="choice" id="flow_kind">
+      <label><input type="radio" name="flow_kind" value="just" checked><span>Just row<small>Set nothing; row, and end the piece on the monitor</small></span></label>
+      <label><input type="radio" name="flow_kind" value="piece"><span>Set a piece on the monitor<small>A distance, a time, splits or intervals</small></span></label>
+      <label><input type="radio" name="flow_kind" value="guided"><span>A guided session<small>Spoken instructions, and a report at the end</small></span></label>
+    </div>
+    <div id="flow_piece" hidden>
 <section class="setup" id="setup">
   <span>Set up the PM5:</span>
   <label>named <select id="wo_named"><option value="">choose…</option></select></label>
@@ -191,7 +267,8 @@
   <button id="wo_clear" title="End the programmed piece on the monitor" disabled>Clear</button>
   <span id="wo_status"></span>
 </section>
-
+    </div>
+    <div id="flow_guided" hidden>
 <section class="panel guided" id="guided">
   <div class="fields">
     <h2 style="margin:0">Guided session</h2>
@@ -200,11 +277,21 @@
     <label><input type="checkbox" id="g_ready"> use the warm-up as a readiness check (optional)</label>
     <label><input type="checkbox" id="g_voice" checked> voice</label>
     <button id="g_start" class="primary">Start</button>
-    <button id="g_stop" hidden>Stop</button>
     <button id="g_sim" hidden>Simulate a rower</button>
   </div>
   <div class="note" id="g_about"></div>
   <div class="note" id="g_plan"></div>
+  
+  
+  
+</section>
+    </div>
+    <div class="actions"><button id="flow_start" class="primary big">Start rowing</button><span id="flow_msg"></span></div>
+  </div>
+</section>
+
+<section class="screen" id="screen_row" hidden>
+  <div class="rowbar"><button id="g_stop" hidden>Stop</button></div>
   <div id="g_live" hidden>
     <div id="g_block"></div>
     <div style="display:flex; align-items:baseline; gap:18px; flex-wrap:wrap"><div id="g_big"></div><div id="g_left"></div></div>
@@ -213,18 +300,7 @@
     <div id="g_next"></div>
     <div id="g_said"></div>
   </div>
-  <pre id="g_out"></pre>
-  <div id="g_feel" class="fields" hidden>
-    <span>How did the readiness check feel?</span>
-    <label title="0 is resting, 10 is as hard as you can go">effort (0–10) <select id="g_rpe"><option value="">choose…</option><option>0</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option><option>9</option><option>10</option></select></label>
-    <label>soreness or feeling unwell <select id="g_sore"><option value="">choose…</option><option>none</option><option>a little</option><option>a lot</option></select></label>
-    <label>note <input type="text" id="g_note" maxlength="80" placeholder="optional"></label>
-    <button id="g_feel_save">Add to the report</button>
-  </div>
-</section>
-
 <section class="tiles" id="tiles"></section>
-
 <main id="main">
   <div class="panel" id="panel_curve">
     <div class="row" style="justify-content: space-between">
@@ -253,9 +329,7 @@
     <div class="metrics" id="metrics"></div>
   </div>
 </main>
-
 <section class="trends" id="trends"></section>
-
 <div class="tablewrap" id="tablewrap">
   <table id="table"><thead><tr>
     <th>Stroke</th><th>Drive m</th><th>Drive s</th><th>Recov s</th><th>Ratio</th><th>Dist/stroke m</th><th>Peak lbf</th><th>Avg lbf</th><th>Work J</th><th>Power W</th><th>Peak pos</th><th>Rect idx</th><th>HR</th>
@@ -264,31 +338,47 @@
     <th>Split</th><th>Time</th><th>Metres</th><th>Pace</th><th>Rate</th><th>Watts</th><th>HR</th><th>Drag</th>
   </tr></thead><tbody></tbody></table>
 </div>
+</section>
 
-<section class="more" id="more">
-  <div class="panel" id="fitness">
-    <h2>Watts at a set heart rate, and a VO2max estimate</h2>
-    <div class="fields">
-      <label>mass (kg) <input type="number" id="fit_mass" min="30" max="200" step="0.5"></label>
-      <label>max heart rate (optional) <input type="number" id="fit_hrmax" min="100" max="230"></label>
-      <label>resting heart rate (optional) <input type="number" id="fit_rest" min="30" max="120"></label>
-      <label title="The heart rate you aim to stay under on easy rows, such as the top of zone 2. The fitness report gives the watts you hold at it; the progress report, the time you spent above it.">easy-row ceiling, bpm (optional) <input type="number" id="fit_zone" min="60" max="220"></label>
-      <button id="fit_save">Save</button>
-      <button id="fit_all">Across all saved rows</button>
-      <button id="fit_progress" title="Each piece you have rowed more than once (the same distance or time set on the monitor), row by row, with its trend">Progress on repeated pieces</button>
-    </div>
-    <pre id="fit_out"></pre>
-    <div class="note"><span class="hint" tabindex="0">what these numbers mean<span class="tip">The watts at a heart rate near the one you rowed at is the number to trust. The VO2max is a model estimate and has not been checked against a laboratory measurement.</span></span></div>
+<section class="screen" id="screen_done" hidden>
+  <div class="card">
+    <h2 id="done_title">Row finished</h2>
+    <div id="summary"></div>
+    <p class="note" id="done_note"></p>
+    <div class="actions" id="done_files"></div>
   </div>
-  <div class="panel" id="sessions">
+  <div class="card" id="done_guided_card"><h2>Guided session</h2><pre id="g_out"></pre>
+<div id="g_feel" class="fields" hidden>
+    <span>How did the readiness check feel?</span>
+    <label title="0 is resting, 10 is as hard as you can go">effort (0–10) <select id="g_rpe"><option value="">choose…</option><option>0</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option><option>9</option><option>10</option></select></label>
+    <label>soreness or feeling unwell <select id="g_sore"><option value="">choose…</option><option>none</option><option>a little</option><option>a lot</option></select></label>
+    <label>note <input type="text" id="g_note" maxlength="80" placeholder="optional"></label>
+    <button id="g_feel_save">Add to the report</button>
+  </div>
+  </div>
+  <div class="card"><h2>Fitness</h2><div id="done_fit"></div><div class="note"><span class="hint" tabindex="0">what these numbers mean<span class="tip">The watts at a heart rate near the one you rowed at is the number to trust. The VO2max is a model estimate and has not been checked against a laboratory measurement.</span></span></div></div>
+  <div class="card" id="done_progress_card" hidden><h2>This piece over time</h2><pre id="done_progress"></pre></div>
+  <div class="actions"><a href="#today"><button class="primary big">Row again</button></a><a href="#history"><button class="big">History</button></a></div>
+</section>
+
+<section class="screen" id="screen_history" hidden>
+<div class="panel" id="sessions">
     <h2>Saved rows</h2>
     <div id="sessions_list" class="note">none yet</div>
     <div class="note" style="margin-top:8px">The session JSON has every stroke with its force curves; the raw log has every Bluetooth message and can rebuild the session later.</div>
     <div class="fields" style="margin-top:8px"><label class="filebtn" title="Session JSON or raw log files saved on a phone, another browser or by the Python logger">Add rows from files<input type="file" id="importfiles" accept=".json,.jsonl,application/json,application/x-ndjson" multiple hidden></label><span id="import_status" class="note"></span></div>
   </div>
+  <div class="panel card" id="fitness">
+    <h2>Fitness and progress</h2>
+    <div class="fields">      <button id="fit_all">Across all saved rows</button>
+      <button id="fit_progress" title="Each piece you have rowed more than once (the same distance or time set on the monitor), row by row, with its trend">Progress on repeated pieces</button>
+</div>
+    <div id="history_fit"><pre id="fit_out"></pre></div>
+  </div>
 </section>
 
 <footer id="contact">Made by Jonathan Shock · <a href="mailto:jon.shock@gmail.com">jon.shock@gmail.com</a> · questions and problems: <a href="https://github.com/jonstraveladventures/pm5-force-logger/issues">GitHub issues</a></footer>
 <script type="module" src="app.js"></script>
+<script type="module" src="flow.js"></script>
 </body>
 </html>
