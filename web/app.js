@@ -26,7 +26,10 @@ function stamp(d = new Date()) {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
 }
 function setConn(text, cls = "") { $("conn").textContent = text; $("conn").className = cls; }
-const emit = (kind, data) => { (H[kind] || (() => {}))(data); if (!state.sample) guided.onEvent(kind, data); render(); };
+const emit = (kind, data) => {
+  (H[kind] || (() => {}))(data); if (!state.sample) guided.onEvent(kind, data); render();
+  if (kind === "stroke") window.dispatchEvent(new Event("pm5:stroke"));   // the screens page shows the row on its first stroke
+};
 
 // ---------- a session per piece (recorder.js does the recording and saving) ----------
 const rec = new Recorder({ store: DB, stamp, emit, fatigue: d => withFatigue(d),

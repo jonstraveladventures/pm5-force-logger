@@ -6,11 +6,13 @@
 import { render, partIds, setHiddenParts } from "./dashboard.js";
 import * as DB from "./store.js";
 import * as P from "./progress.js";
+import * as Logger from "./logger-feed.js";
 
 const $ = id => document.getElementById(id);
 const SCREENS = ["about", "today", "row", "done", "history"];
 const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
 const keep = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* private window */ } };
+const logger = Logger.detect();
 
 // ---------- what to show while rowing: asked once, changeable any time ----------
 const MINIMAL_TILES = ["tile_time", "tile_dist", "tile_pace", "tile_rate", "tile_hr", "tile_peak"];
@@ -22,8 +24,10 @@ const PRESETS = {
 function applyPreset(name) { setHiddenParts(PRESETS[name](partIds())); keep("pm5_flow_display", name); }
 
 // ---------- screens ----------
+let current = null;
 function show(name) {
   if (!SCREENS.includes(name)) name = load("pm5_flow_seen", false) ? "today" : "about";
+  current = name;
   for (const s of SCREENS) $("screen_" + s).hidden = s !== name;
   document.querySelectorAll("#nav a").forEach(a => a.classList.toggle("here", a.getAttribute("href") === "#" + name));
   $("display").hidden = name !== "row";
@@ -41,6 +45,8 @@ function show(name) {
 }
 const go = name => { if (location.hash.slice(1) === name) show(name); else location.hash = name; };
 window.addEventListener("hashchange", () => show(location.hash.slice(1)));
+// rowing without pressing Start (or the logger recording a piece) still brings up the numbers
+window.addEventListener("pm5:stroke", () => { if (current !== "row") go("row"); });
 
 // ---------- About you ----------
 $("flow_about_done").addEventListener("click", () => {
@@ -77,16 +83,17 @@ const fmt = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2,
 const pace = s => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, "0")}`;
 const mean = xs => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
 
-window.addEventListener("pm5:finished", async ({ detail: { id, data, saved, replay } }) => {
+window.addEventListener("pm5:finished", async ({ detail: { id, data, saved, replay, byLogger } }) => {
   const strokes = data.strokes || [], sm = data.summary || {}, last = strokes[strokes.length - 1] || {};
   const dist = sm.distance_m ?? last.distance_m, time = sm.elapsed_s ?? last.elapsed_s;
   const w = mean(strokes.map(s => s.power_w).filter(Boolean)), hr = mean(strokes.map(s => s.hr).filter(Boolean));
   const items = [["Distance", dist != null ? `${Math.round(dist)} m` : "—"], ["Time", time != null ? fmt(time) : "—"],
-    ["Pace /500m", sm.avg_pace_s ? pace(sm.avg_pace_s) : dist && time ? pace(time / dist * 500) : "—"],   // the monitor's own average when it gives one ["Strokes", strokes.length],
+    ["Pace /500m", sm.avg_pace_s ? pace(sm.avg_pace_s) : dist && time ? pace(time / dist * 500) : "—"],   // the monitor's own average when it gives one
+    ["Strokes", strokes.length],
     ["Power", w != null ? `${Math.round(w)} W` : "—"], ["Heart rate", hr != null ? `${Math.round(hr)} bpm` : "—"]];
   $("summary").replaceChildren(...items.map(([k, v]) => { const d = document.createElement("div"), a = document.createElement("span"), b = document.createElement("b"); a.textContent = k; b.textContent = v; d.append(a, b); return d; }));
   $("done_title").textContent = replay ? "Replay finished" : "Row finished";
-  $("done_note").textContent = replay ? "A replay is not saved." : saved === "all" || saved === undefined ? `Saved as ${id}.` : "Not saved in full: the box at the top has the files to download.";
+  $("done_note").textContent = replay ? "A replay is not saved." : byLogger ? `Saved by the logger as ${id}.` : saved === "all" || saved === undefined ? `Saved as ${id}.` : "Not saved in full: the box at the top has the files to download.";
   const files = $("done_files"); files.replaceChildren();
   if (id && saved !== "none" && saved !== undefined) for (const [act, label] of [["json", "Session JSON"], ["fit", "FIT file"], ["raw", "Raw log"]]) {
     const b = document.createElement("button"); b.textContent = label;
@@ -104,6 +111,15 @@ window.addEventListener("pm5:finished", async ({ detail: { id, data, saved, repl
   }
   go("done");
 });
+
+// ---------- served by the Python logger ----------
+// The logger holds the PM5 and keeps the rows in its own folder, so there is nothing to connect
+// and no history in the page; a replay from the logger has no row to run a guided session in.
+if (logger) {
+  $("connect_card").hidden = true;
+  document.querySelectorAll('a[href="#history"]').forEach(a => { a.hidden = true; });
+  if (logger.replay) document.querySelector('input[name="flow_kind"][value="guided"]').closest("label").hidden = true;
+}
 
 // ---------- start ----------
 if (!load("pm5_flow_display", null) && load("pm5_flow_seen", false)) applyPreset("standard");

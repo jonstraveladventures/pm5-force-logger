@@ -129,8 +129,10 @@ class HubApiTests(unittest.TestCase):
                              b"/examples/sample_row.jsonl", b"/.git", b"/package.json/", b"//etc/passwd",
                              b"/voice/../pm5_logger.py", b"/voice/x.js", b"/voice/Any-Rate.mp3", b"/tools/make_voice.py"):
                     self.assertEqual((await get(port, path))[0], 404, path)
-                s, page = await http(port, "GET", "/")
-                self.assertIn(b'<meta name="pm5-logger" content="{&quot;replay&quot;: &quot;2026-09-22_164718&quot;}">', page)
+                for path in ("/", "/classic.html"):      # the screens page and the one-page version
+                    s, page = await http(port, "GET", path)
+                    self.assertEqual(s, 200, path)
+                    self.assertIn(b'<meta name="pm5-logger" content="{&quot;replay&quot;: &quot;2026-09-22_164718&quot;}">', page, path)
             finally:
                 server.close()
                 await server.wait_closed()

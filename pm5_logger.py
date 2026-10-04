@@ -484,7 +484,7 @@ class Hub:
                 await writer.drain()
             elif method == "GET" and (f := web_file(path)):
                 page = f.read_bytes()
-                if f.name == "index.html":
+                if f.suffix == ".html":   # the screens page and the classic one
                     mark = html.escape(json.dumps({"replay": self.replay}))
                     page = page.replace(b"<head>", f'<head>\n<meta name="pm5-logger" content="{mark}">'.encode(), 1)
                 writer.write(f"HTTP/1.1 200 OK\r\nContent-Type: {WEB_TYPES[f.suffix]}\r\n"
