@@ -561,11 +561,18 @@ def rel(p: Path) -> str:
         return str(p)
 
 
+# Added to a session file after the row, so a --reparse of the raw log can't rebuild them: the
+# Logbook id (which stops a second upload), a note that the posted result was later deleted from
+# the Logbook, a guided report the raw log lacks, and the browser version's fatigue analysis.
+KEEP_ON_REPARSE = ("logbook_id", "logbook_deleted", "guided", "fatigue")
+
+
 def save(sess_path: Path, data: dict) -> None:
-    if sess_path.exists():  # keep the Logbook id across a --reparse
+    if sess_path.exists():  # a --reparse keeps what was added after the row
         old = json.loads(sess_path.read_text())
-        if old.get("logbook_id"):
-            data["logbook_id"] = old["logbook_id"]
+        for k in KEEP_ON_REPARSE:
+            if old.get(k) is not None and data.get(k) is None:   # a fresh parse's own value wins
+                data[k] = old[k]
     sess_path.parent.mkdir(parents=True, exist_ok=True)
     sess_path.write_text(json.dumps(data, indent=1))
     n = sum(1 for s in data["strokes"] if "force_curve" in s)

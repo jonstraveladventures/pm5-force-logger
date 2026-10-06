@@ -121,7 +121,7 @@ You can use a workout name from `workouts.json` in place of this syntax, and edi
 
 Everything is saved in `data/` (change it with `--out`), which `.gitignore` keeps out of version control.
 
-- `data/raw/<start>.jsonl` contains every Bluetooth notification as hex, with the time it arrived. This is the source of truth: if the parser improves, `--reparse` can rebuild the session from it.
+- `data/raw/<start>.jsonl` contains every Bluetooth notification as hex, with the time it arrived. This is the source of truth: if the parser improves, `--reparse` can rebuild the session from it. A reparse keeps what was added to the session file after the row: the Logbook id, a note that the result was deleted from the Logbook, a guided report and the browser version's fatigue analysis.
 - `data/sessions/<start>.json` contains one record per stroke:
 
 ```json

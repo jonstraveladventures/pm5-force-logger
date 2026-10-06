@@ -216,6 +216,38 @@ class SessionTests(unittest.TestCase):
         self.assertEqual(s.summary["received_at"], 500.0)
 
 
+class ReparseKeepsAnnotationsTests(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+        self.dir = Path(tempfile.mkdtemp())
+        self.path = self.dir / "2026-09-18_171111.json"
+
+    def save(self, data):
+        L.save(self.path, data)
+        return json.loads(self.path.read_text())
+
+    def test_fields_added_after_the_row_survive(self):
+        self.path.write_text(json.dumps({"strokes": [], "logbook_id": 7, "logbook_deleted": "2026-10-04",
+                                         "guided": {"kind": "rate"}, "fatigue": {"onset_s": 900},
+                                         "unmatched_curves": 3}))
+        out = self.save({"strokes": [{"stroke_count": 1}], "unmatched_curves": 0})
+        self.assertEqual((out["logbook_id"], out["logbook_deleted"]), (7, "2026-10-04"))
+        self.assertEqual((out["guided"], out["fatigue"]), ({"kind": "rate"}, {"onset_s": 900}))
+        self.assertEqual(out["unmatched_curves"], 0)   # parser output comes from the fresh parse
+        self.assertEqual(out["strokes"], [{"stroke_count": 1}])
+
+    def test_a_fresh_parse_keeps_its_own_guided_report(self):
+        self.path.write_text(json.dumps({"strokes": [], "guided": {"kind": "old"}}))
+        self.assertEqual(self.save({"strokes": [], "guided": {"kind": "raw"}})["guided"], {"kind": "raw"})
+
+    def test_other_fields_are_not_carried(self):
+        self.path.write_text(json.dumps({"strokes": [], "something_else": 1}))
+        self.assertNotIn("something_else", self.save({"strokes": []}))
+
+    def test_a_first_save_adds_nothing(self):
+        self.assertEqual(sorted(self.save({"strokes": []})), ["strokes"])
+
+
 class SampleRoundTripTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
