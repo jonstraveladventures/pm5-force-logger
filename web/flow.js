@@ -7,6 +7,7 @@ import { render, partIds, setHiddenParts } from "./dashboard.js";
 import * as DB from "./store.js";
 import * as P from "./progress.js";
 import * as Logger from "./logger-feed.js";
+import * as Files from "./files.js";
 
 const $ = id => document.getElementById(id);
 const SCREENS = ["about", "today", "row", "done", "history"];
@@ -39,6 +40,7 @@ function show(name) {
   if (name === "about") {
     const cur = load("pm5_flow_display", matchMedia("(max-width: 640px)").matches ? "minimal" : "standard");
     for (const r of document.querySelectorAll('input[name="flow_display"]')) r.checked = r.value === cur;
+    showFileSetting();
   }
   window.scrollTo(0, 0);
   if (name === "row") render();   // the charts measure themselves, which they cannot do while hidden
@@ -57,6 +59,28 @@ $("flow_about_done").addEventListener("click", () => {
   go("today");
 });
 
+// ---------- where each row's files go (files.js) ----------
+let dir = null;   // the chosen folder, read once so a click can ask for access straight away
+const folderReady = Files.folder().then(d => { dir = d; if (current === "about") showFileSetting(); });
+function showFileSetting(msg = "") {
+  const m = Files.mode() === "folder" && !dir ? "download" : Files.mode();
+  for (const r of document.querySelectorAll('input[name="files_mode"]')) r.checked = r.value === m;
+  $("files_folder").textContent = dir ? `(${dir.name})` : "";
+  $("files_choose").textContent = dir ? "Choose another folder" : "Choose a folder";
+  $("files_msg").textContent = msg || (Files.canPickFolder() ? "" : "This browser can't be given a folder, so the files go to its downloads folder.");
+}
+async function pickFolder() {
+  try { const d = await Files.chooseFolder(); if (d) dir = d; showFileSetting(d ? "" : "No folder chosen."); }
+  catch (e) { showFileSetting(`The browser would not give the page a folder (${e.message}).`); }
+}
+for (const r of document.querySelectorAll('input[name="files_mode"]')) r.addEventListener("change", () => {
+  if (r.value === "folder" && !dir) pickFolder(); else { Files.setMode(r.value); showFileSetting(); }
+});
+$("files_choose").addEventListener("click", pickFolder);
+if (!Files.canPickFolder()) $("files_folder_opt").hidden = $("files_choose").hidden = true;
+/** From a click: Chrome asks again for the folder, if it needs to, before the row rather than after. */
+const askForFolder = () => { if (Files.mode() === "folder" && dir) Files.access(dir, true).catch(() => {}); };
+
 // ---------- Today's row ----------
 const kind = () => (document.querySelector('input[name="flow_kind"]:checked') || {}).value;
 for (const r of document.querySelectorAll('input[name="flow_kind"]')) r.addEventListener("change", () => {
@@ -65,6 +89,7 @@ for (const r of document.querySelectorAll('input[name="flow_kind"]')) r.addEvent
 const live = () => !$("stop").hidden || $("conn").classList.contains("live");
 $("flow_start").addEventListener("click", () => {
   const msg = $("flow_msg"); msg.textContent = "";
+  askForFolder();
   if (kind() === "guided") {
     $("g_start").click();   // the guided session starts itself, or says why not
     if (!$("g_live").hidden) go("row"); else msg.textContent = $("g_out").textContent || "The session didn't start.";
@@ -83,7 +108,26 @@ const fmt = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2,
 const pace = s => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, "0")}`;
 const mean = xs => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
 
-window.addEventListener("pm5:finished", async ({ detail: { id, data, saved, replay, byLogger } }) => {
+/** What became of the row's files, with a button when Chrome must be asked again for the folder. */
+function showSaved(files, row) {
+  const p = $("done_saved"); p.replaceChildren();
+  if (!files || files.mode === "none") return;
+  if (files.needAccess) {
+    const b = document.createElement("button");
+    b.textContent = `Save them to ${files.folder}`;
+    b.addEventListener("click", async () => {
+      await folderReady;
+      if (dir && await Files.access(dir, true)) showSaved(await Files.saveRow(row, { dir, download: DB.download }), row);
+    });
+    p.append(`The files are not saved yet: Chrome needs your permission again for the folder ${files.folder}. `, b);
+  } else if (files.error) p.textContent = files.folder
+    ? `${files.written.length ? `Only ${files.written.join(", ")} reached` : "None of its files reached"} the folder ${files.folder} (${files.error}). The buttons below download them.`
+    : `Its files could not be saved (${files.error}). The buttons below download them.`;
+  else if (files.mode === "folder") p.textContent = `Its files are in the folder ${files.folder}.`;
+  else p.textContent = `Its files were downloaded${files.lostFolder ? " (this browser no longer knows the chosen folder)" : ""}. If Chrome asks whether the page may download several files, choose Allow.`;
+}
+
+window.addEventListener("pm5:finished", async ({ detail: { id, data, lines, saved, replay, byLogger, files: savedFiles } }) => {
   const strokes = data.strokes || [], sm = data.summary || {}, last = strokes[strokes.length - 1] || {};
   const dist = sm.distance_m ?? last.distance_m, time = sm.elapsed_s ?? last.elapsed_s;
   const w = mean(strokes.map(s => s.power_w).filter(Boolean)), hr = mean(strokes.map(s => s.hr).filter(Boolean));
@@ -94,6 +138,7 @@ window.addEventListener("pm5:finished", async ({ detail: { id, data, saved, repl
   $("summary").replaceChildren(...items.map(([k, v]) => { const d = document.createElement("div"), a = document.createElement("span"), b = document.createElement("b"); a.textContent = k; b.textContent = v; d.append(a, b); return d; }));
   $("done_title").textContent = replay ? "Replay finished" : "Row finished";
   $("done_note").textContent = replay ? "A replay is not saved." : byLogger ? `Saved by the logger as ${id}.` : saved === "all" || saved === undefined ? `Saved as ${id}.` : "Not saved in full: the box at the top has the files to download.";
+  showSaved(savedFiles, { id, data, lines });
   const files = $("done_files"); files.replaceChildren();
   if (id && saved !== "none" && saved !== undefined) for (const [act, label] of [["json", "Session JSON"], ["fit", "FIT file"], ["raw", "Raw log"]]) {
     const b = document.createElement("button"); b.textContent = label;
@@ -116,7 +161,7 @@ window.addEventListener("pm5:finished", async ({ detail: { id, data, saved, repl
 // The logger holds the PM5 and keeps the rows in its own folder, so there is nothing to connect
 // and no history in the page; a replay from the logger has no row to run a guided session in.
 if (logger) {
-  $("connect_card").hidden = true;
+  $("connect_card").hidden = $("files_card").hidden = true;
   document.querySelectorAll('a[href="#history"]').forEach(a => { a.hidden = true; });
   if (logger.replay) document.querySelector('input[name="flow_kind"][value="guided"]').closest("label").hidden = true;
 }

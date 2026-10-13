@@ -16,6 +16,7 @@ import * as P from "./progress.js";
 import * as Logger from "./logger-feed.js";
 import { Recorder, rebuild } from "./recorder.js";
 import * as Count from "./count.js";
+import * as Files from "./files.js";
 
 const $ = id => document.getElementById(id);
 const state = { pm: null, endTimer: null, sample: false, named: {}, lastSaved: null, logger: null, unsaved: new Map() };
@@ -58,25 +59,34 @@ function withFatigue(data) {
 /** Save the current piece (if it has strokes) and leave the dashboard showing it. */
 async function saveRow(reason) {
   clearTimeout(state.endTimer); state.endTimer = null;
-  afterSave(await rec.finish(), reason);
+  await afterSave(await rec.finish(), reason);
 }
 
 /** Report a save. What was not written stays in memory, with buttons to download it. */
 const announceFinished = detail => window.dispatchEvent(new CustomEvent("pm5:finished", { detail }));
 
-function afterSave(out, reason) {
+/** The row's files, saved as Settings says (files.js): downloaded, or written to the chosen folder. */
+async function saveFiles(out) {
+  try { return await Files.saveRow(out, { dir: await Files.folder(), download: DB.download }); }
+  catch (e) { return { mode: Files.mode(), written: [], error: e.message }; }
+}
+
+async function afterSave(out, reason) {
   if (!out) return;
-  const { id, data } = out;
-  announceFinished({ id, data, saved: out.saved });
+  const { id, data } = out, files = await saveFiles(out);
+  announceFinished({ id, data, lines: out.lines, saved: out.saved, files });
   if (out.saved !== "none") { state.lastSaved = id; Count.event("row-saved"); }
   if (out.saved === "all") {
     H.ended({ session: id });
     if (data.fatigue && data.fatigue.onset_s != null) $("banner").textContent += ` · peak position drifted later from ${G.fmtClock(data.fatigue.onset_s)}`;
     setConn(`${reason}; saved ${data.strokes.length} strokes as ${id}`, state.pm && state.pm.connected ? "live" : "");
   } else {
-    state.unsaved.set(id, { ...out, need: new Set(out.saved === "session" ? ["raw"] : ["json", "raw"]) });
+    const need = new Set(out.saved === "session" ? ["raw"] : ["json", "raw"]);
+    if (files.written.includes(`${id}.json`)) need.delete("json");   // already downloaded or in the folder
+    if (files.written.includes(`${id}.jsonl`)) need.delete("raw");
+    if (need.size) state.unsaved.set(id, { ...out, need });
     showUnsaved();
-    setConn(`${reason}; saving ${id} failed: download it from the box above`, "err");
+    setConn(`${reason}; saving ${id} in this browser failed: ${need.size ? "download it from the box above" : "its files were saved outside it"}`, "err");
     $("banner").textContent = out.saved === "session" ? "raw log not saved" : "not saved";
   }
   showFitness([[id, data]]);
@@ -390,7 +400,10 @@ const guided = new GuidedUI({ $, H, S, render, metrics, DB, isConnected: () => !
     }
     if (recording()) { rec.meta.guided = result; return; }
     if (!state.lastSaved) return;
-    try { const s = await DB.getSession(state.lastSaved); if (s) { s.guided = result; await DB.putSession(s); } } catch { /* the report is still on the page */ }
+    try {
+      const s = await DB.getSession(state.lastSaved);
+      if (s) { s.guided = result; await DB.putSession(s); await Files.updateJson(s, { dir: await Files.folder() }); }
+    } catch { /* the report is still on the page */ }
   } });
 
 // ---------- served by the Python logger: it records, the page shows ----------

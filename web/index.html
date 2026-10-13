@@ -169,6 +169,7 @@
   #summary b { display: block; font-size: 1.4rem; font-variant-numeric: tabular-nums; }
   #summary span { color: var(--ink3); font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; }
   #flow_msg { color: var(--warn); font-size: .88rem; }
+  .note a { color: var(--ink2); }
   #flow_guided #g_start { display: none; }   /* "Start rowing" starts the session */
   #screen_today #setup, #screen_today #guided { margin: 10px 0 0; padding: 0; background: none; }
   #screen_row #g_live { margin: 8px 20px 0; background: var(--panel); border-radius: 10px; padding: 10px 14px; }
@@ -226,6 +227,16 @@
     </div>
     <p class="note">You can change any part of it later from "Change the display" while rowing.</p>
   </div>
+  <div class="card" id="files_card">
+    <h2>Each row's files</h2>
+    <p class="note">When a row is saved, the page also saves its raw log, session JSON and FIT file. The row stays in this browser too, and History has its files at any time.</p>
+    <div class="choice" id="files_mode">
+      <label><input type="radio" name="files_mode" value="download"><span>Download them<small>To the browser's downloads folder</small></span></label>
+      <label id="files_folder_opt"><input type="radio" name="files_mode" value="folder"><span>Save them to a folder <b id="files_folder"></b><small>You choose the folder once. On a later visit Chrome may ask again for access: choose "Allow on every visit" and it stops asking.</small></span></label>
+      <label><input type="radio" name="files_mode" value="none"><span>Don't save files<small>Keep rows in this browser only</small></span></label>
+    </div>
+    <div class="actions"><button id="files_choose">Choose a folder</button><span id="files_msg" class="note"></span></div>
+  </div>
   <div class="actions"><button id="flow_about_done" class="primary big">Continue</button></div>
   <p class="note">The <a href="classic.html">classic page</a> has everything on one long page instead, with the same saved rows and settings.</p>
 </section>
@@ -240,7 +251,7 @@
     </div>
     <details style="margin-top:10px"><summary class="note">How it works</summary>
 <div id="intro">
-  <p><b>Record a Concept2 PM5 from this page: every stroke's force curve, live, with nothing to install.</b> Rows are kept in this browser and leave it only as files you download. <span data-privacy>Nothing is sent anywhere.</span></p>
+  <p><b>Record a Concept2 PM5 from this page: every stroke's force curve, live, with nothing to install.</b> Rows are kept in this browser and leave it only as files saved on your own computer or phone. <span data-privacy>Nothing is sent anywhere.</span></p>
   <p id="nobt" class="warn" hidden>This browser cannot talk to Bluetooth devices. Open this page in Chrome or Edge (on a Mac, Windows PC, Chromebook or Android phone); Safari and Firefox don't offer Web Bluetooth.</p>
   <ol>
     <li>Close ErgData and any other rowing app: the PM5 talks to one app at a time, and a Bluetooth symbol on its screen means something is still connected.</li>
@@ -346,6 +357,7 @@
     <h2 id="done_title">Row finished</h2>
     <div id="summary"></div>
     <p class="note" id="done_note"></p>
+    <p class="note" id="done_saved"></p>
     <div class="actions" id="done_files"></div>
   </div>
   <div class="card" id="done_guided_card"><h2>Guided session</h2><pre id="g_out"></pre>
