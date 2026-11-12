@@ -197,6 +197,23 @@ test("a lap's highest heart rate is never below its average", () => {
   for (const l of of(read(encode({ ...sample, splits: [] })), 19)) assert.ok(l.f[16] >= l.f[15]);
 });
 
+test("a short last split's rate and power of 0 give way to its strokes", () => {
+  // a timed piece can end with a split of a few seconds that the PM5 reports at 0 spm (a real
+  // row ended with one of 3.7 s and 7 m); a lap at 0 spm and 0 W would be wrong in any FIT reader
+  const T = sample.strokes[sample.strokes.length - 1].elapsed_s, cut = T - 3;
+  const splits = [{ split_number: 1, split_time_s: cut, split_distance_m: 500, end_s: cut, split_spm: 22, split_power_w: 150 },
+                  { split_number: 2, split_time_s: 3, split_distance_m: 7, end_s: T, split_spm: 0, split_power_w: 0, split_speed_ms: 0 }];
+  const mine = sample.strokes.filter(s => s.elapsed_s > cut);
+  assert.ok(mine.length, "the sample has a stroke in the last split");
+  const [first, lap] = of(read(encode({ ...sample, splits })), 19);
+  assert.equal(first.f[17], 22, "a split's own rate is kept");
+  assert.equal(first.f[19], 150, "and its own power");
+  assert.equal(lap.f[17], Math.round(mine.reduce((a, s) => a + strokeRate(s), 0) / mine.length));
+  const powers = mine.map(s => s.power_w).filter(Boolean);
+  assert.equal(lap.f[19], Math.round(powers.reduce((a, b) => a + b, 0) / powers.length));
+  assert.ok(lap.f[13] > 0, "a speed from its distance and time");
+});
+
 test("a row with no strokes still writes a valid, empty activity", () => {
   const msgs = read(encode({ started: "2026-09-20_100000", strokes: [], summary: {} }));
   assert.equal(of(msgs, 20).length, 0);

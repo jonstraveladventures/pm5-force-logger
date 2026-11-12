@@ -36,7 +36,12 @@ export function rowMeasures(sess, { ceiling, hr_rest }) {
   let above = null;
   if (ceiling != null && withHr.length) {
     above = 0;
-    for (let i = 1; i < strokes.length; i++) if (strokes[i].hr > ceiling) above += strokes[i].elapsed_s - strokes[i - 1].elapsed_s;
+    // each stroke over the ceiling counts the time since the one before; a gap of more than 15 s
+    // is a pause or lost signal, not rowing, so it counts nothing
+    for (let i = 1; i < strokes.length; i++) {
+      const dt = strokes[i].elapsed_s - strokes[i - 1].elapsed_s;
+      if (strokes[i].hr > ceiling && dt > 0 && dt <= 15) above += dt;
+    }
   }
   // drift: power per heart rate, first half of the steady part against the second
   const win = steadyWindow(strokes);

@@ -84,7 +84,7 @@ You need a PM5 with Bluetooth, a computer with Bluetooth LE and Python 3.10 or n
 2. Wake the PM5 by pressing a button.
 3. Run `python pm5_logger.py`. It finds the PM5, connects to it and opens the dashboard. On a Mac, `caffeinate -d python pm5_logger.py` also keeps the screen from dimming or locking while it runs.
 4. Row, then end the piece on the monitor with the Menu button. The PM5 sends its end-of-workout summary only when the piece is ended on the monitor.
-5. The logger stops 75 seconds later, when the PM5 sends the summary again with your recovery heart rate. It also stops 10 minutes after the last stroke, or when you press Ctrl+C. Every way of stopping saves the session.
+5. The logger stops 75 seconds later, when the PM5 sends the summary again with your recovery heart rate. It also stops 10 minutes after the last stroke, or when you press Ctrl+C. Every way of stopping saves the session. After a readiness check, the dashboard stays open for up to three minutes so you can say how the check felt.
 
 It records one piece per run. Stroke counts restart at 1 when you start another piece on the monitor, so if that happens the logger saves the first piece and exits; run it again for the next one. Pausing mid-piece is fine.
 

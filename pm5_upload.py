@@ -203,7 +203,8 @@ def upload_session(path, dry_run: bool = False):
     status, body = concept2.post_result(payload)
     if status == 201:
         sess["logbook_id"] = body["data"]["id"]
-        path.write_text(json.dumps(sess, indent=1))
+        from pm5_logger import write_json   # whole or not at all: the id is what stops a second post
+        write_json(path, sess)
         print(f"posted to the Logbook as result {sess['logbook_id']}")
         return sess["logbook_id"]
     if status == 409:

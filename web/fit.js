@@ -255,13 +255,14 @@ export function encode(sess) {
     const row = { message_index: i, timestamp: stamp(t0 + lap.end_s), event: 9, event_type: 1,
       start_time: stamp(t0 + lap.start_s), total_elapsed_time: dur, total_timer_time: dur,
       total_distance: lap.distance_m, total_cycles: lapCycles || null, total_calories: lap.calories ?? (lapList.length === 1 ? sm.calories_total : null),
-      avg_speed: lap.speed_ms ?? (dur > 0 && lap.distance_m ? lap.distance_m / dur : null),
+      avg_speed: lap.speed_ms || (dur > 0 && lap.distance_m ? lap.distance_m / dur : null),
       avg_heart_rate: lapAvgHr,
       // the monitor averages the split over every second while we sample once a stroke, so its
       // average can sit above the highest beat we saw; the maximum is at least the average
       max_heart_rate: lapHrs.length || lapAvgHr ? Math.max(...lapHrs, lapAvgHr || 0) : null,
-      avg_cadence: lap.spm ?? (mine.length ? mine.reduce((a, r) => a + (r.StrokeRate || 0), 0) / mine.length : null),
-      avg_power: lap.power_w ?? (powers.length ? powers.reduce((a, b) => a + b, 0) / powers.length : null),
+      // a split of a few seconds at the end of a piece comes with a rate of 0: the strokes give it instead
+      avg_cadence: lap.spm || (mine.length ? mine.reduce((a, r) => a + (r.StrokeRate || 0), 0) / mine.length : null),
+      avg_power: lap.power_w || (powers.length ? powers.reduce((a, b) => a + b, 0) / powers.length : null),
       max_power: powers.length ? Math.max(...powers) : null,
       lap_trigger: lapList.length === 1 ? 7 : 8, sport: SPORT_ROWING, sub_sport: SUB_INDOOR_ROWING };
     if (!lapDefined) { messages(buf, 7, MESG.lap, lapFields, [], [row]); lapDefined = true; }

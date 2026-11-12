@@ -49,6 +49,8 @@ const go = name => { if (location.hash.slice(1) === name) show(name); else locat
 window.addEventListener("hashchange", () => show(location.hash.slice(1)));
 // rowing without pressing Start (or the logger recording a piece) still brings up the numbers
 window.addEventListener("pm5:stroke", () => { if (current !== "row") go("row"); });
+// "view" in History puts a saved row on the Rowing screen: go there to see it
+window.addEventListener("pm5:view", () => go("row"));
 
 // ---------- About you ----------
 $("flow_about_done").addEventListener("click", () => {
@@ -167,5 +169,8 @@ if (logger) {
 }
 
 // ---------- start ----------
-if (!load("pm5_flow_display", null) && load("pm5_flow_seen", false)) applyPreset("standard");
+// the display chosen in Settings; Reset in the display menu clears the saved display and comes back to it
+const chosen = load("pm5_flow_display", null);
+if (chosen && PRESETS[chosen] && load("pm5_display", null) === null) applyPreset(chosen);
+else if (!chosen && load("pm5_flow_seen", false)) applyPreset("standard");
 show(location.hash.slice(1));

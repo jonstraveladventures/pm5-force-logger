@@ -19,7 +19,7 @@ import * as Count from "./count.js";
 import * as Files from "./files.js";
 
 const $ = id => document.getElementById(id);
-const state = { pm: null, endTimer: null, sample: false, named: {}, lastSaved: null, logger: null, unsaved: new Map() };
+const state = { pm: null, endTimer: null, sample: false, named: {}, lastSaved: null, logger: null, unsaved: new Map(), fileTrouble: new Map() };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 function stamp(d = new Date()) {
@@ -59,6 +59,9 @@ function withFatigue(data) {
 /** Save the current piece (if it has strokes) and leave the dashboard showing it. */
 async function saveRow(reason) {
   clearTimeout(state.endTimer); state.endTimer = null;
+  // a guided session still running (Stop pressed, or the PM5 gone) ends with the row, so its
+  // report goes into the row's files and onto the Finished screen
+  if (guided.running && !guided.sim) await guided.finish(true);
   await afterSave(await rec.finish(), reason);
 }
 
@@ -89,13 +92,34 @@ async function afterSave(out, reason) {
     setConn(`${reason}; saving ${id} in this browser failed: ${need.size ? "download it from the box above" : "its files were saved outside it"}`, "err");
     $("banner").textContent = out.saved === "session" ? "raw log not saved" : "not saved";
   }
+  // the screens page says what became of the files on its Finished screen; the classic page says
+  // here when they did not reach the chosen folder
+  if (!$("done_saved") && (files.needAccess || files.error) && !state.unsaved.has(id)) { state.fileTrouble.set(id, { out, files }); showUnsaved(); }
   showFitness([[id, data]]);
   refreshSessions();
 }
 
 function showUnsaved() {
   const box = $("unsaved");
-  box.replaceChildren(); box.hidden = !state.unsaved.size;
+  box.replaceChildren(); box.hidden = !state.unsaved.size && !state.fileTrouble.size;
+  for (const [id, { out, files }] of state.fileTrouble) {
+    const p = box.appendChild(document.createElement("div")), b = document.createElement("button");
+    if (files.needAccess) {
+      p.append(`${id}'s files are not saved yet: Chrome needs your permission again for the folder ${files.folder}. `, b);
+      b.textContent = `Save them to ${files.folder}`;
+      b.addEventListener("click", async () => {
+        const dir = await Files.folder();
+        if (!dir || !(await Files.access(dir, true))) return;
+        const again = await Files.saveRow(out, { dir, download: DB.download });
+        if (again.needAccess || again.error) state.fileTrouble.set(id, { out, files: again }); else state.fileTrouble.delete(id);
+        showUnsaved();
+      });
+    } else {
+      p.append(files.folder ? `Not all of ${id}'s files reached the folder ${files.folder} (${files.error}). ` : `${id}'s files could not be saved (${files.error}). `, b);
+      b.textContent = "Download them";
+      b.addEventListener("click", async () => { await Files.saveRow(out, { mode: "download", download: DB.download }); state.fileTrouble.delete(id); showUnsaved(); });
+    }
+  }
   for (const [id, u] of state.unsaved) {
     const p = box.appendChild(document.createElement("div"));
     p.textContent = u.saved === "session"
@@ -365,6 +389,7 @@ $("sessions_list").addEventListener("click", async e => {
       stroke_rate: sm.avg_stroke_rate ?? last.spm, hr: last.hr, drag_factor: sm.drag_factor_avg, calories_total: sm.calories_total, avg_power_w: sm.avg_watts, workout_type: sm.workout_type };
     H.snapshot({ status, summary: sm, strokes: s.strokes, splits: s.splits || [] }); $("banner").textContent = `showing ${id}`; render();
     showFitness([[id, s]]);
+    window.dispatchEvent(new CustomEvent("pm5:view", { detail: { id } }));   // the screens page goes to the Rowing screen
   } else if (act === "json") {
     DB.download(`${id}.json`, JSON.stringify(await DB.getSession(id), null, 1));
   } else if (act === "fit") {
@@ -394,6 +419,7 @@ const guided = new GuidedUI({ $, H, S, render, metrics, DB, isConnected: () => !
   },
   onResult: async result => {   // the report goes into the row's session file
     if (state.logger) {
+      state.logger.guided = result;   // for the report shown when the row ends
       try { await Logger.saveGuided(result); }
       catch (e) { $("g_out").textContent += `\n\nThe logger did not keep this report (${e.message}); copy it from here.`; }
       return;
@@ -427,7 +453,10 @@ function useLogger(info) {
     if (kind === "new_piece") $("banner").textContent = "a new piece started on the PM5: the logger is saving this one; run it again for the next piece";
     if (kind === "ended") {
       $("banner").textContent = info.replay ? `replay of ${data.session} finished (a replay is not saved)` : `session ${data.session} saved by the logger`;
-      const row = { strokes: [...S.strokes.values()].sort((a, b) => a.stroke_count - b.stroke_count), summary: S.summary, splits: [...S.splits.values()] };
+      // the row as the logger saves it, with the guided report (a step test's stages) and the piece set on the monitor
+      const row = { strokes: [...S.strokes.values()].sort((a, b) => a.stroke_count - b.stroke_count), summary: S.summary, splits: [...S.splits.values()],
+        ...(state.logger.guided ? { guided: state.logger.guided } : {}), ...(S.device && S.device.workout ? { workout: S.device.workout } : {}) };
+      state.logger.guided = null;
       showFitness([[data.session, row]]);
       announceFinished({ id: info.replay ? null : data.session, data: row, replay: info.replay || null, byLogger: true });
     }

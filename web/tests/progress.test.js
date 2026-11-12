@@ -32,6 +32,13 @@ test("time above the ceiling, and heart-rate drift over the steady part", () => 
   assert.equal(flat.finished, true);
 });
 
+test("a pause is not time above the ceiling", () => {
+  // 600 s of rowing at 150 bpm with a 5-minute stop in the middle: only the rowing counts
+  const r = row({ started: week(0), seconds: 600, distance: 2000, hr: () => 150 });
+  r.strokes = r.strokes.map(s => (s.elapsed_s > 300 ? { ...s, elapsed_s: s.elapsed_s + 300 } : s));
+  assert.equal(rowMeasures(r, { ceiling: 148, hr_rest: 50 }).above_s, 600 - 4 - 4, "every 4 s step but the first stroke's and the pause");
+});
+
 test("the trend is fitted to every finished row, and the scatter about it is shown", () => {
   const rows = [1300, 1296, 1280, 1284].map((s, i) => row({ started: week(i), seconds: s, distance: 5000, workout: "5000 m" }));
   const p = progress(rows, { ceiling: 148, hr_rest: 50 }), g = p.groups[0];

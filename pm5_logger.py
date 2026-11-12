@@ -43,6 +43,7 @@ import os
 import re
 import signal
 import sys
+import tempfile
 import time
 import webbrowser
 from datetime import datetime
@@ -61,6 +62,7 @@ DEVICE_INFO = {0x0011: "model", 0x0012: "serial", 0x0013: "hardware_rev",
                0x0014: "firmware_rev", 0x0015: "manufacturer"}
 IDLE_STOP_S = 600          # stop 10 min after the last stroke (the PM5 sends status every second while awake)
 AFTER_END_S = 75           # the PM5 re-sends its summary with recovery HR after 1 min of rest
+FEEL_WAIT_S = 180          # after a readiness check, how long the dashboard stays up for how it felt
 CURVE_MATCH_S = 3.0        # a force curve belongs to the stroke record within this many seconds
 MAX_BODY_BYTES = 64 * 1024  # the dashboard's own POST is a few dozen bytes; nothing larger is read
 HEAD_TIMEOUT_S = 10.0       # a request must arrive, headers and body, within this long
@@ -567,14 +569,31 @@ def rel(p: Path) -> str:
 KEEP_ON_REPARSE = ("logbook_id", "logbook_deleted", "guided", "fatigue")
 
 
+def write_json(path: Path, data: dict) -> None:
+    """Write a session file whole or not at all: a crash part way leaves the old file, not half a new one."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=1)
+        os.replace(tmp, path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
+
+
 def save(sess_path: Path, data: dict) -> None:
     if sess_path.exists():  # a --reparse keeps what was added after the row
-        old = json.loads(sess_path.read_text())
+        try:
+            old = json.loads(sess_path.read_text())
+        except json.JSONDecodeError:   # cut short by a crash: the raw log rebuilds it
+            print(f"{rel(sess_path)} could not be read; writing it afresh from the raw log", flush=True)
+            old = {}
         for k in KEEP_ON_REPARSE:
             if old.get(k) is not None and data.get(k) is None:   # a fresh parse's own value wins
                 data[k] = old[k]
-    sess_path.parent.mkdir(parents=True, exist_ok=True)
-    sess_path.write_text(json.dumps(data, indent=1))
+    write_json(sess_path, data)
     n = sum(1 for s in data["strokes"] if "force_curve" in s)
     print(f"saved {len(data['strokes'])} strokes ({n} with force curves) -> {rel(sess_path)}")
 
@@ -616,6 +635,40 @@ def post(sess_path: Path, data: dict) -> None:
         print(f"Logbook upload failed ({e}); the row is saved. Retry: python pm5_upload.py {rel(sess_path)}")
 
 
+class GuidedReports:
+    """A guided session's report, sent by the dashboard, kept with the row: in the raw log while the
+    row is recorded (so a --reparse keeps it), and in the session file once that is saved. A
+    readiness check's report comes a second time with how the check felt, which the page asks
+    after the row, so the logger keeps the dashboard up a while for it."""
+
+    def __init__(self, meta: dict, raw, sess_path: Path):
+        self.meta, self.raw, self.sess_path, self.felt = meta, raw, sess_path, asyncio.Event()
+
+    def take(self, report: dict) -> None:
+        if (self.meta.get("guided") or {}).get("readiness") and report.get("readiness"):
+            self.felt.set()          # the readiness report again, now with how it felt
+        self.meta["guided"] = report
+        if not self.raw.closed:
+            self.raw.write(json.dumps({"t": round(time.time(), 3), "guided": report}) + "\n")
+        elif self.sess_path.exists():   # the row has been saved already
+            saved = json.loads(self.sess_path.read_text())
+            saved["guided"] = report
+            write_json(self.sess_path, saved)
+
+    def waiting_for_feel(self, stop: asyncio.Event) -> bool:
+        return bool((self.meta.get("guided") or {}).get("readiness")) and not self.felt.is_set() and not stop.is_set()
+
+    async def wait_for_feel(self, stop: asyncio.Event, timeout_s: float = FEEL_WAIT_S) -> bool:
+        """Wait for how the readiness check felt, Ctrl+C or the timeout; True if the answer came."""
+        waits = [asyncio.ensure_future(self.felt.wait()), asyncio.ensure_future(stop.wait())]
+        try:
+            await asyncio.wait(waits, timeout=timeout_s, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            for w in waits:
+                w.cancel()
+        return self.felt.is_set()
+
+
 async def log_session(minutes: float | None, upload: bool = True, open_browser: bool = True,
                       workout: dict | None = None):
     from bleak import BleakClient
@@ -630,7 +683,7 @@ async def log_session(minutes: float | None, upload: bool = True, open_browser: 
     raw_path, sess_path = OUT / "raw" / f"{start}.jsonl", OUT / "sessions" / f"{start}.json"
     session, stop = Session(echo=True, emit=hub.publish), asyncio.Event()
     hub.session = session
-    raw = raw_path.open("a")
+    raw = raw_path.open("a", buffering=1, encoding="utf-8")   # a line at a time, so a crash loses at most one packet
 
     def on_notify(short):
         def handler(_char, data: bytearray):
@@ -674,16 +727,8 @@ async def log_session(minutes: float | None, upload: bool = True, open_browser: 
                 return desc
             hub.programmer = programmer
 
-            def take_guided(report):
-                """A guided session finished on the dashboard: its report goes into the session file."""
-                meta["guided"] = report
-                if not raw.closed:     # in the raw log too, so a --reparse keeps it
-                    raw.write(json.dumps({"t": round(time.time(), 3), "guided": report}) + "\n")
-                elif sess_path.exists():   # the row has been saved already
-                    saved = json.loads(sess_path.read_text())
-                    saved["guided"] = report
-                    sess_path.write_text(json.dumps(saved, indent=1))
-            hub.take_guided = take_guided
+            guided = GuidedReports(meta, raw, sess_path)
+            hub.take_guided = guided.take
             service = client.services.get_service(ROWING_SERVICE)
             if service is None:
                 sys.exit(f"{dev.name} does not offer the Concept2 rowing service; is it a PM5?")
@@ -722,6 +767,11 @@ async def log_session(minutes: float | None, upload: bool = True, open_browser: 
     fitness(sess_path, data)
     if upload:
         post(sess_path, data)
+    if guided.waiting_for_feel(stop):
+        print(f"the dashboard stays open up to {FEEL_WAIT_S // 60} minutes for how the readiness check felt "
+              "(answer it on the page, or Ctrl+C)", flush=True)
+        felt = await guided.wait_for_feel(stop)
+        print("added how it felt to the session file" if felt else "no answer; the report is saved without it", flush=True)
     server.close()
 
 

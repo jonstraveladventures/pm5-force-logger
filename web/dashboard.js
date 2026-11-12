@@ -227,12 +227,14 @@ function loadUI() { try { return JSON.parse(localStorage.getItem("pm5_display"))
 const uiValue = k => { const el = $("ui_" + k); const v = el ? parseFloat(el.value) : NaN; return Number.isNaN(v) ? UI[k][1] : v; };
 
 /** Everything that can be hidden, in the order the menu lists it. Parts a page doesn't have (the
- *  Python-served dashboard has no guided or fitness panel) are left out. */
+ *  Python-served dashboard has no guided or fitness panel) are left out, and so, on the screens
+ *  page, are the sections that make up its other screens, where the menu can't reach them. */
+const ON_SCREENS = new Set($("screen_today") ? ["setup", "guided", "fitness", "sessions"] : []);
 function partGroups() {
   return [["Tiles", TILE_DEFS.map(([k, l]) => ["tile_" + k, l])],
           ["Charts", [["panel_curve", "Force curve"], ["panel_shape", "Curve shape"], ...TRENDS.map((t, i) => ["trend" + i, t[0].replace(/ \(.*/, "")])]],
           ["Sections", [["setup", "Set up the PM5"], ["guided", "Guided session"], ["tablewrap", "Stroke table"], ["fitness", "Fitness panel"], ["sessions", "Saved rows"]]]]
-    .map(([g, items]) => [g, items.filter(([id]) => $(id))]).filter(([, items]) => items.length);
+    .map(([g, items]) => [g, items.filter(([id]) => $(id) && !ON_SCREENS.has(id))]).filter(([, items]) => items.length);
 }
 const allParts = () => partGroups().flatMap(([, items]) => items);
 /** Every part the display can hide, and a way to set which are hidden (as the menu would, remembered). */

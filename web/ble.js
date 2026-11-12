@@ -53,7 +53,15 @@ export async function connect({ onNotify, onDisconnect, log = () => {} }) {
     pm.control = control;
   } catch { /* no control service: recording still works, programming doesn't */ }
   pm.disconnect = () => { try { device.gatt.disconnect(); } catch { /* already gone */ } };
-  pm.send = (frame, timeoutMs = 3000) => send(pm, frame, timeoutMs);
+  // one CSAFE command at a time: a second one sent while the first waits for its reply would
+  // empty the reply buffer and take the first one's reply (the monitor check on connecting and a
+  // workout sent straight after it, say)
+  let queue = Promise.resolve();
+  pm.send = (frame, timeoutMs = 3000) => {
+    const run = queue.then(() => send(pm, frame, timeoutMs));
+    queue = run.catch(() => {});
+    return run;
+  };
   log(`subscribed: ${pm.subscribed.map(s => s.toString(16).padStart(4, "0")).join(" ")}`);
   return pm;
 }

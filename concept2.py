@@ -18,6 +18,7 @@ import os
 import secrets
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -37,6 +38,8 @@ AUTHORIZE_URL = "https://log.concept2.com/oauth/authorize"
 TOKEN_URL = "https://log.concept2.com/oauth/access_token"
 SCOPES = "user:read,results:write"   # write implies read; a refresh asking for less narrows the token
 REDIRECT = os.environ.get("CONCEPT2_REDIRECT_URI", "http://localhost:8766")
+NET_TIMEOUT_S = 30     # a Concept2 request that has not answered by then has failed
+AUTH_WAIT_S = 300      # how long the sign-in waits for the browser to come back
 
 
 class NotConfigured(RuntimeError):
@@ -71,7 +74,7 @@ def _save_env(key: str, value: str) -> None:
 def _token_request(data: dict) -> dict:
     body = urllib.parse.urlencode(data).encode()
     try:
-        return json.loads(urllib.request.urlopen(urllib.request.Request(TOKEN_URL, data=body)).read())
+        return json.loads(urllib.request.urlopen(urllib.request.Request(TOKEN_URL, data=body), timeout=NET_TIMEOUT_S).read())
     except urllib.error.HTTPError as e:
         detail = e.read().decode(errors="replace")[:300]
         raise RuntimeError(f"Concept2 token request failed (HTTP {e.code}): {detail}") from None
@@ -106,8 +109,15 @@ def auth() -> None:
     webbrowser.open(url)
     port = urlparse(REDIRECT).port or 80
     server = HTTPServer(("localhost", port), Handler)
-    while "code" not in got:
-        server.handle_request()
+    server.timeout = min(5, AUTH_WAIT_S)   # handle_request returns every few seconds, so the wait can end
+    deadline = time.monotonic() + AUTH_WAIT_S
+    try:
+        while "code" not in got:
+            if time.monotonic() > deadline:
+                sys.exit(f"Concept2 sign-in not finished within {AUTH_WAIT_S // 60} minutes; run this again.")
+            server.handle_request()
+    finally:
+        server.server_close()
     resp = _token_request({"client_id": cid, "client_secret": secret, "code": got["code"],
                            "grant_type": "authorization_code", "redirect_uri": REDIRECT, "scope": SCOPES})
     _save_env("CONCEPT2_REFRESH_TOKEN", resp["refresh_token"])
@@ -131,7 +141,7 @@ def _request(method: str, path: str, payload: dict | None = None) -> tuple[int, 
         data, headers["Content-Type"] = json.dumps(payload).encode(), "application/json"
     req = urllib.request.Request(f"{API}{path}", data=data, method=method, headers=headers)
     try:
-        with urllib.request.urlopen(req) as r:
+        with urllib.request.urlopen(req, timeout=NET_TIMEOUT_S) as r:
             return r.status, json.loads(r.read() or b"{}")
     except urllib.error.HTTPError as e:
         try:
