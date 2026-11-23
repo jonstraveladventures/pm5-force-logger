@@ -3,7 +3,7 @@
 // stroke: about 45 points, a quick catch, a long flat top, a falling finish.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { savgol, smoothed, metrics, trim } from "../curve.js";
+import { savgol, smoothed, metrics, trim, channelFor } from "../curve.js";
 
 function prng(seed) { let a = seed >>> 0; return () => { a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
 const gauss = r => Math.sqrt(-2 * Math.log(r() || 1e-9)) * Math.cos(2 * Math.PI * r());
@@ -48,4 +48,14 @@ test("with noise like the PM5's, smoothing removes nearly all false dips and kee
 test("smoothing keeps the stroke's length, so the handle-travel axis is unchanged", () => {
   const p = stroke(45, { noise: 0.025 });
   assert.equal(smoothed(p, true).length, trim(p).length);
+});
+
+test("a PM5 that sends only force against time gets that curve drawn", () => {
+  const curve = [0, 12, 40, 66, 70, 52, 20, 0];
+  const older = { force_curve: curve }, both = { force_curve: curve, force_curve_v2: curve }, none = { force_curve: [0, 0] };
+  assert.equal(channelFor([]), "force_curve_v2", "no strokes yet: force against handle travel");
+  assert.equal(channelFor([older]), "force_curve_v2", "one stroke: its 0x0043 curve may still be arriving");
+  assert.equal(channelFor([older, older]), "force_curve");
+  assert.equal(channelFor(new Map([[1, none], [2, older], [3, older]]).values()), "force_curve", "a Map's values, as the dashboard passes them");
+  assert.equal(channelFor([older, older, both]), "force_curve_v2", "once a 0x0043 curve arrives, it is used");
 });

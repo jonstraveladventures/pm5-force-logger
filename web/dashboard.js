@@ -1,7 +1,7 @@
 // The live dashboard: tiles, the force curve with its shape measures, trends and the stroke
 // table, fed through H (the event handlers): by the page's own Session when it holds the PM5,
 // or by the Python logger's server-sent events when the logger serves the page (logger-feed.js).
-import { trim, resample, metrics, smoothed, CM_PER_POINT } from "./curve.js";
+import { trim, resample, metrics, smoothed, channelFor, CM_PER_POINT } from "./curve.js";
 export { trim, resample, metrics };
 export const S = { strokes: new Map(), status: {}, summary: {}, device: {}, splits: new Map(), hrSeen: null };   // hrSeen: the last heart rate and when
 // Characteristic 0x0043 is force against handle travel: each reading is 3.5/3 inches of the handle
@@ -86,6 +86,9 @@ function setupCanvas(c) { const dpr = window.devicePixelRatio || 1, w = c.client
 const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 const canvasFont = () => `${Math.round(11 * (parseFloat(css("--text")) || 1))}px -apple-system, sans-serif`;
 const src = () => $("src").value;
+// The Curve menu follows the channel the PM5 sends until the rower picks one themselves.
+let srcChosen = false;
+function followChannel() { if (srcChosen) return; const c = channelFor(S.strokes.values()); if ($("src").value !== c) $("src").value = c; }
 // the curve as analysed: raw, or smoothed if the Smoothing choice says so
 const pts = s => smoothed(s[src()], $("smooth") && $("smooth").value === "5");
 const refKey = () => $("refsel").value;
@@ -203,7 +206,7 @@ function renderTable() {
 }
 
 let pending = false;
-export function render() { if (pending) return; pending = true; requestAnimationFrame(() => { pending = false; renderTiles(); drawCurve(); renderMetrics(); drawTrends(); renderTable(); renderSplits(); }); }
+export function render() { if (pending) return; pending = true; requestAnimationFrame(() => { pending = false; followChannel(); renderTiles(); drawCurve(); renderMetrics(); drawTrends(); renderTable(); renderSplits(); }); }
 window.addEventListener("resize", render);
 
 // ---------- display: sizes and what is shown, remembered per browser ----------
@@ -403,7 +406,7 @@ function applyUI(save = true) {
   });
   applyUI(false);
 })();
-$("src").addEventListener("change", render);
+$("src").addEventListener("change", () => { srcChosen = true; render(); });
 $("refsel").addEventListener("change", () => { rememberChoices(); render(); });
 $("school").addEventListener("change", () => { rememberChoices(); render(); });
 $("bands").addEventListener("change", () => { rememberChoices(); render(); });

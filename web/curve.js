@@ -6,6 +6,14 @@
 export const CM_PER_POINT = 3.5 / 3 * 2.54;
 
 export function trim(p) { if (!p || p.length < 3) return null; let a = 0, b = p.length - 1; while (a < b && p[a] <= 0) a++; while (b > a && p[b] <= 0) b--; return b - a >= 2 ? p.slice(a, b + 1) : null; }
+/** The force-curve channel to draw for these strokes: force against handle travel (0x0043),
+ *  unless at least two strokes carry force against time (0x003D) and none carries 0x0043, as from a
+ *  PM5 whose firmware predates March 2026. Two, because 0x0043 arrives just after 0x003D. */
+export function channelFor(strokes) {
+  let older = 0;
+  for (const s of strokes) { if (trim(s.force_curve_v2)) return "force_curve_v2"; if (trim(s.force_curve)) older++; }
+  return older >= 2 ? "force_curve" : "force_curve_v2";
+}
 export function resample(p, n = 101) { const m = p.length; return Array.from({ length: n }, (_, i) => { const x = i * (m - 1) / (n - 1), j = Math.floor(x), f = x - j; return j + 1 < m ? p[j] * (1 - f) + p[j + 1] * f : p[m - 1]; }); }
 
 export function metrics(points) {
