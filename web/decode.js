@@ -2,6 +2,7 @@
 // A port of parse(), ForceCurve and Session in pm5_logger.py; tests/decode.test.js checks it
 // against the Python output on the same packets. Byte layouts follow Concept2's "PM Bluetooth
 // Smart Communication Interface Definition" rev 1.30 (little-endian).
+import { curveReply, FORCEPLOT_BLOCK } from "./csafe.js";
 
 export const uuid = short => `ce06${short.toString(16).padStart(4, "0")}-43e5-11e4-916c-0800200c9a66`;
 export const ADVERTISED_SERVICE = uuid(0x0000);
@@ -104,6 +105,12 @@ export class ForceCurve {
 }
 
 const CURVES = { 0x003d: "force_curve", 0x0043: "force_curve_v2" };
+// Replies to CSAFE commands arrive on the control service's 0x0022. The page logs its replies to
+// the force-curve commands (ble.js fetchCurves) under that uuid, so a raw log rebuilds the curves
+// it fetched: each 0x6B reply adds its points, a short one ends the curve, and a stroke-state reply
+// (logged when the state changes) drops whatever a cut-off read left half done.
+export const CSAFE_REPLY = 0x0022;
+export const CMD_CURVE = "force_curve_cmd";
 
 /** Turns a stream of (arrival time, characteristic, bytes) into one record per stroke.
  *  Same rules as the Python Session: stroke data arrives twice per stroke, records are keyed on
@@ -112,7 +119,7 @@ const CURVES = { 0x003d: "force_curve", 0x0043: "force_curve_v2" };
 export class Session {
   constructor(emit) {
     this.strokes = new Map(); this.unmatched = []; this.summary = {}; this.status = {}; this.splits = new Map();
-    this.fc = { 0x003d: new ForceCurve(), 0x0043: new ForceCurve() };
+    this.fc = { 0x003d: new ForceCurve(), 0x0043: new ForceCurve() }; this.cmdPoints = null;
     this.maxCount = 0; this.lastStrokeT = null; this.endAt = null; this.newPieceAt = null;
     this.emit = emit || (() => {});
   }
@@ -123,6 +130,7 @@ export class Session {
       if (curve) this._attachCurve(t, CURVES[short], curve);
       return;
     }
+    if (short === CSAFE_REPLY) { this._commandReply(t, b); return; }
     const p = parse(short, b);
     if (!p) return;
     if (short === 0x0035) { this._stroke(t, p); return; }
@@ -191,6 +199,16 @@ export class Session {
       }
     }
     this.emit("stroke", s);
+  }
+
+  _commandReply(t, b) {
+    const r = curveReply(b);
+    if (!r) return;
+    if ("state" in r) { this.cmdPoints = null; return; }
+    this.cmdPoints = [...(this.cmdPoints || []), ...r.points];
+    if (r.bytes >= FORCEPLOT_BLOCK) return;   // a full read: there may be more
+    const curve = this.cmdPoints; this.cmdPoints = null;
+    if (curve.length) this._attachCurve(t, CMD_CURVE, curve);
   }
 
   _attachCurve(t, key, points) {

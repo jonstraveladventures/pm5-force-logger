@@ -3,7 +3,7 @@
 // stroke: about 45 points, a quick catch, a long flat top, a falling finish.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { savgol, smoothed, metrics, trim, channelFor } from "../curve.js";
+import { savgol, smoothed, metrics, trim, channelFor, firstCurve, noCurveText, NO_CURVES_AFTER } from "../curve.js";
 
 function prng(seed) { let a = seed >>> 0; return () => { a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
 const gauss = r => Math.sqrt(-2 * Math.log(r() || 1e-9)) * Math.cos(2 * Math.PI * r());
@@ -58,4 +58,22 @@ test("a PM5 that sends only force against time gets that curve drawn", () => {
   assert.equal(channelFor([older, older]), "force_curve");
   assert.equal(channelFor(new Map([[1, none], [2, older], [3, older]]).values()), "force_curve", "a Map's values, as the dashboard passes them");
   assert.equal(channelFor([older, older, both]), "force_curve_v2", "once a 0x0043 curve arrives, it is used");
+});
+
+test("curves fetched by command are drawn when the PM5 sends neither curve channel", () => {
+  const curve = [0, 12, 40, 66, 70, 52, 20, 0];
+  const cmd = { force_curve_cmd: curve }, older = { force_curve: curve, force_curve_cmd: curve };
+  assert.equal(channelFor([cmd]), "force_curve_cmd");
+  assert.equal(channelFor([older, older]), "force_curve", "with ?curves=command on a PM5 that sends 0x003D, its own channel stays");
+  assert.equal(channelFor([{ force_curve_v2: curve, force_curve: curve, force_curve_cmd: curve }]), "force_curve_v2");
+  assert.equal(firstCurve(cmd), curve);
+});
+
+test("the curve panel says why there is no curve", () => {
+  const bare = { stroke_count: 1 }, curve = [0, 12, 40, 66, 70, 52, 20, 0];
+  assert.equal(noCurveText([], "force_curve"), "waiting for the first stroke…");
+  assert.equal(noCurveText([bare, bare], "force_curve"), "waiting for the first force curve…", "a curve may still be on its way");
+  assert.equal(noCurveText(Array(NO_CURVES_AFTER).fill(bare), "force_curve_v2"), "this PM5 isn't sending force curves");
+  assert.match(noCurveText([bare, bare, bare, { force_curve: curve }], "force_curve_v2"), /choose another in the Curve menu/);
+  assert.equal(noCurveText([bare, { force_curve_cmd: curve }], "force_curve_cmd"), null);
 });

@@ -8,6 +8,7 @@ import * as V from "./vo2.js";
 import * as BLE from "./ble.js";
 import * as DB from "./store.js";
 import { H, render, S, metrics } from "./dashboard.js";
+import { firstCurve } from "./curve.js";
 import * as G from "./guided.js";
 import { GuidedUI } from "./guided-ui.js";
 import * as Wake from "./wake.js";
@@ -19,7 +20,7 @@ import * as Count from "./count.js";
 import * as Files from "./files.js";
 
 const $ = id => document.getElementById(id);
-const state = { pm: null, endTimer: null, sample: false, named: {}, lastSaved: null, logger: null, unsaved: new Map(), fileTrouble: new Map() };
+const state = { pm: null, curves: null, endTimer: null, sample: false, named: {}, lastSaved: null, logger: null, unsaved: new Map(), fileTrouble: new Map() };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 function stamp(d = new Date()) {
@@ -34,12 +35,32 @@ const emit = (kind, data) => {
 
 // ---------- a session per piece (recorder.js does the recording and saving) ----------
 const rec = new Recorder({ store: DB, stamp, emit, fatigue: d => withFatigue(d),
-  onStart: meta => { H.reset({}); if (state.pm) H.device({ ...state.pm.info, workout: meta.workout }); render(); } });
+  onStart: meta => { H.reset({}); if (state.pm) H.device({ ...state.pm.info, workout: meta.workout }); render();
+    if (state.curves) rec.note(Date.now() / 1000, { curve_commands: state.curvesWhy }); } });   // each piece's raw log says so
 const recording = () => !!(rec.session && rec.session.strokes.size);
+
+// ---------- force curves by command, for a PM5 that doesn't send them ----------
+// A PM5 that offers neither curve characteristic (0x003D, 0x0043), as a first-generation PM5 on
+// firmware 39 doesn't, is asked for each stroke's curve by command from the start; one that offers
+// them but sends no curve with two strokes is asked from then on. ?curves=command asks from the
+// start whatever the PM5 sends, to compare the two routes on one row.
+const CURVES_BY_COMMAND = new URLSearchParams(location.search).get("curves") === "command";
+function fetchCurvesByCommand(why) {
+  if (state.curves || !state.pm || !state.pm.control) return;
+  state.curvesWhy = `asking for each stroke's force curve by command: ${why}`;
+  rec.note(Date.now() / 1000, { curve_commands: state.curvesWhy });
+  state.curves = BLE.fetchCurves(state.pm, { onReply: (t, raw) => onPacket(t, 0x0022, raw),
+    onNote: (t, text) => rec.note(t, { curve_commands: text }) });
+}
+function strokesWithoutCurves() {
+  if (state.curves || !rec.session || rec.session.strokes.size < 2) return;
+  if (![...rec.session.strokes.values()].some(firstCurve)) fetchCurvesByCommand("strokes are arriving without one");
+}
 
 function onPacket(t, short, b) {
   if (short === 0x003b) { const p = parse(short, b); if (p && p.hrm_id) rememberHrm({ mfg: p.hrm_mfg, type: p.hrm_type, id: p.hrm_id }, "paired with"); }
   const { finishing } = rec.packet(t, short, b);
+  if (short === 0x0035) strokesWithoutCurves();
   if (finishing) {                      // the PM5 started a new piece: the recorder is saving the old one and recording the new
     clearTimeout(state.endTimer); state.endTimer = null;
     finishing.then(out => afterSave(out, "a new piece started on the PM5"));
@@ -52,7 +73,7 @@ function onPacket(t, short, b) {
 
 /** When peak position started drifting later, if it did: saved with every row. */
 function withFatigue(data) {
-  data.fatigue = G.fatigueOnset(data.strokes.map(st => { const c = st.force_curve_v2 || st.force_curve, m = c ? metrics(c) : null; return { t: st.elapsed_s, a100: m ? m.a100 : null }; }));
+  data.fatigue = G.fatigueOnset(data.strokes.map(st => { const c = firstCurve(st), m = c ? metrics(c) : null; return { t: st.elapsed_s, a100: m ? m.a100 : null }; }));
   return data;
 }
 
@@ -173,6 +194,9 @@ async function connect() {
   rec.start();
   updateWake();
   syncHeartRateMonitor();
+  const offers = [0x003d, 0x0043].filter(c => state.pm.subscribed.includes(c));
+  if (CURVES_BY_COMMAND) fetchCurvesByCommand("?curves=command");
+  else if (!offers.length) fetchCurvesByCommand("this PM5 offers no force-curve characteristic");
   setConn(`live: ${state.pm.info.name}${state.pm.info.firmware_rev ? ", firmware " + state.pm.info.firmware_rev : ""}. Row when ready; end the piece on the PM5 (Menu)`, "live");
 }
 
@@ -180,12 +204,14 @@ async function onDisconnected() {
   if (recording()) await saveRow("the PM5 disconnected");
   else if (!state.stopping) setConn("the PM5 disconnected");   // after Stop, the line keeps what the save said
   state.stopping = false;
+  if (state.curves) { state.curves.stop(); state.curves = null; }
   state.pm = null;
   updateWake();
   $("connect").disabled = false; $("stop").hidden = true; $("wo_send").disabled = true; $("wo_clear").disabled = true;
 }
 
 async function stop() {
+  if (state.curves) state.curves.stop();   // no more requests while the row saves and the PM5 disconnects
   state.stopping = recording();       // a save to report, which the disconnect then leaves on the line
   if (state.stopping) await saveRow("stopped");
   if (state.pm) state.pm.disconnect();   // onDisconnected does the rest

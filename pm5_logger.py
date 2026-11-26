@@ -167,6 +167,37 @@ class ForceCurve:
         return None
 
 
+# Replies to CSAFE commands arrive on the control service's 0x0022. The browser version, on a PM5
+# that sends no force curve, asks for each stroke's curve by command (spec rev 0.36, "Get Force
+# Curve": CSAFE_PM_GET_STROKESTATE 0xBF until recovery, then CSAFE_PM_GET_FORCEPLOTDATA 0x6B until
+# a read comes back short, both in the 0x1A wrapper) and logs the replies under that uuid.
+CSAFE_REPLY = 0x0022
+USERCFG1, GET_STROKESTATE, GET_FORCEPLOTDATA = 0x1A, 0xBF, 0x6B
+FORCEPLOT_BLOCK = 32       # bytes asked for per read: 16 points, the most the PM5 sends at once
+
+
+def curve_reply(raw: bytes) -> dict | None:
+    """What a reply to the force-curve commands says: {"state"} or {"bytes", "points"} (points
+    least significant byte first); None for anything else. web/csafe.js curveReply() is the same."""
+    from pm5_workouts import unframe
+    try:
+        _status, resp = unframe(raw)
+    except ValueError:
+        return None
+    if len(resp) < 2 or resp[0] != USERCFG1:
+        return None
+    inner, i = resp[2:2 + resp[1]], 0
+    while i + 1 < len(inner):
+        cmd, data = inner[i], inner[i + 2:i + 2 + inner[i + 1]]
+        if cmd == GET_STROKESTATE and len(data) >= 1:
+            return {"state": data[0]}
+        if cmd == GET_FORCEPLOTDATA and len(data) >= 1:
+            n = min(data[0], FORCEPLOT_BLOCK, len(data) - 1) & ~1
+            return {"bytes": data[0], "points": [u16(data, k) for k in range(1, 1 + n, 2)]}
+        i += 2 + inner[i + 1]
+    return None
+
+
 class Session:
     """Turns a stream of (arrival time, characteristic, bytes) into one record per stroke.
 
@@ -175,7 +206,10 @@ class Session:
     stroke's). Records are keyed on stroke count; count 0 is the reset at a workout's start or
     end and is dropped. Force curves come on two channels: 0x003D (documented; time-stepped, so
     each reading repeats 2-3 times, with leading zeros) and 0x0043 (not in spec rev 1.30, sent by
-    2026 firmware just after 0x003D; same packet scheme, one point per reading).
+    2026 firmware just after 0x003D; same packet scheme, one point per reading). A third,
+    force_curve_cmd, is read from logged replies to the force-curve commands (CSAFE_REPLY): each
+    force-plot reply adds its points, a short one ends the curve, and a stroke-state reply drops
+    whatever a cut-off read left half done.
 
     A session holds one piece. Stroke counts restart at 1 when a new piece starts on the
     monitor, so a count that has already been recorded and is below the latest one means a new
@@ -188,6 +222,7 @@ class Session:
     def __init__(self, echo=False, emit=None):
         self.strokes, self.unmatched, self.summary, self.status, self.splits = {}, [], {}, {}, {}
         self.fc = {k: ForceCurve() for k in self.CURVES}
+        self.cmd_points = None
         self.max_count, self.last_stroke_t, self.end_at, self.new_piece_at = 0, None, None, None
         self.echo, self.emit = echo, emit or (lambda kind, data: None)
 
@@ -196,6 +231,9 @@ class Session:
             curve = self.fc[short].add(b)
             if curve:
                 self._attach_curve(t, self.CURVES[short], curve)
+            return
+        if short == CSAFE_REPLY:
+            self._command_reply(t, b)
             return
         p = parse(short, b)
         if not p:
@@ -271,6 +309,20 @@ class Session:
         if self.echo:
             print(f"stroke {n:4d}  {p['distance_m']:7.1f} m  peak {p['peak_force_lbf']:5.1f} lbf  "
                   f"drive {p['drive_length_m']:.2f} m / {p['drive_time_s']:.2f} s", flush=True)
+
+    def _command_reply(self, t, b):
+        r = curve_reply(b)
+        if r is None:
+            return
+        if "state" in r:
+            self.cmd_points = None
+            return
+        self.cmd_points = (self.cmd_points or []) + r["points"]
+        if r["bytes"] >= FORCEPLOT_BLOCK:   # a full read: there may be more
+            return
+        curve, self.cmd_points = self.cmd_points, None
+        if curve:
+            self._attach_curve(t, "force_curve_cmd", curve)
 
     def _attach_curve(self, t, key, points):
         if self.new_piece_at is not None:
@@ -594,7 +646,7 @@ def save(sess_path: Path, data: dict) -> None:
             if old.get(k) is not None and data.get(k) is None:   # a fresh parse's own value wins
                 data[k] = old[k]
     write_json(sess_path, data)
-    n = sum(1 for s in data["strokes"] if "force_curve" in s)
+    n = sum(1 for s in data["strokes"] if any(k in s for k in ("force_curve", "force_curve_v2", "force_curve_cmd")))
     print(f"saved {len(data['strokes'])} strokes ({n} with force curves) -> {rel(sess_path)}")
 
 

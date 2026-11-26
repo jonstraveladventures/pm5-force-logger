@@ -16,6 +16,7 @@ sys.path.insert(0, str(ROOT))
 
 import pm5_logger as L    # noqa: E402
 import pm5_upload as U    # noqa: E402
+import pm5_workouts as W  # noqa: E402
 
 
 def le(v, n):
@@ -134,6 +135,57 @@ class ForceCurveTests(unittest.TestCase):
         fc = L.ForceCurve()
         self.assertFalse(fc.add(bytes([0x00, 0x00])))
         self.assertIsNone(fc.add(b"\x11"))
+
+
+class CurveByCommandTests(unittest.TestCase):
+    """Replies to the force-curve commands, logged by the browser version under uuid 0022."""
+
+    @staticmethod
+    def plot(points):
+        data = b"".join(le(v, 2) for v in points)
+        return W.frame(bytes([0x05, 0x1A, 35, 0x6B, 33, 2 * len(points)]) + data + bytes(32 - len(data)))
+
+    def test_the_spec_example_replies(self):
+        self.assertEqual(L.curve_reply(bytes.fromhex("F1091A03BF0104AAF2")), {"state": 4})
+        self.assertEqual(L.curve_reply(self.plot([0x41, 0x41, 0x79])), {"bytes": 6, "points": [0x41, 0x41, 0x79]})
+        self.assertIsNone(L.curve_reply(bytes.fromhex("F1091A03BF0104ABF2")))   # bad checksum
+        self.assertIsNone(L.curve_reply(W.frame(bytes([0x15]))))                 # a refusal
+
+    def test_reads_join_until_a_short_one(self):
+        s = L.Session()
+        s.feed(10.0, 0x0035, stroke_packet(1, 10, 10))
+        pts = list(range(1, 33)) + [7, 241, 498]      # 32 points, then 3: 241 and 498 need stuffing
+        s.feed(10.1, 0x0022, W.frame(bytes([0x05, 0x1A, 3, 0xBF, 1, 4])))
+        for k, chunk in enumerate([pts[:16], pts[16:32], pts[32:]]):
+            s.feed(10.2 + 0.05 * k, 0x0022, self.plot(chunk))
+        self.assertEqual(s.strokes[1]["force_curve_cmd"], pts)
+
+    def test_a_curve_cut_off_by_the_next_drive_is_dropped(self):
+        s = L.Session()
+        s.feed(10.0, 0x0035, stroke_packet(1, 10, 10))
+        s.feed(10.2, 0x0022, self.plot(list(range(16))))
+        s.feed(11.0, 0x0022, W.frame(bytes([0x05, 0x1A, 3, 0xBF, 1, 2])))
+        s.feed(11.5, 0x0035, stroke_packet(2, 11.5, 20))
+        s.feed(11.6, 0x0022, self.plot([3, 9, 4]))
+        self.assertNotIn("force_curve_cmd", s.strokes[1])
+        self.assertEqual(s.strokes[2]["force_curve_cmd"], [3, 9, 4])
+
+    def test_the_command_fixture_matches_the_sample_curves(self):
+        meta, events = L.read_raw(ROOT / "web" / "tests" / "fixtures" / "command_row.jsonl")
+        sample_meta, sample_events = L.read_raw(ROOT / "examples" / "sample_row.jsonl")
+        s, ref = L.Session(), L.Session()
+        for t, short, b in events:
+            s.feed(t, short, b)
+        for t, short, b in sample_events:
+            ref.feed(t, short, b)
+        for n, st in s.strokes.items():
+            if n in (3, 5, 9):       # the fixture's edge cases
+                continue
+            self.assertEqual(st["force_curve_cmd"], ref.strokes[n]["force_curve"], f"stroke {n}")
+            self.assertAlmostEqual(max(st["force_curve_cmd"]), st["peak_force_lbf"], delta=0.5)
+        self.assertNotIn("force_curve_cmd", s.strokes[5])
+        self.assertEqual(len(s.strokes[3]["force_curve_cmd"]), 32)
+        self.assertIn(498, s.strokes[9]["force_curve_cmd"])
 
 
 class SessionTests(unittest.TestCase):

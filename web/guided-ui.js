@@ -6,6 +6,7 @@ import * as G from "./guided.js";
 import { SimRower } from "./sim.js";
 import * as V from "./vo2.js";
 import { Player, FIXED as SPOKEN } from "./voice.js";
+import { firstCurve } from "./curve.js";
 
 const store = {
   get: (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } },
@@ -151,7 +152,7 @@ export class GuidedUI {
   addStroke(rec) {
     const e = this.engine;
     if (!e.started) e.begin(rec.t);
-    const curve = rec.force_curve_v2 || rec.force_curve, m = curve ? this.metrics(curve) : null;
+    const curve = firstCurve(rec), m = curve ? this.metrics(curve) : null;
     let rmse = null;
     if (m) {
       if (this.norms.length >= 5) {

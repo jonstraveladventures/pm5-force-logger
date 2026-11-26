@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { Session, ForceCurve, parse, hexToBytes, readRaw, uuid, ROWING_SERVICE } from "../decode.js";
+import { Session, ForceCurve, parse, hexToBytes, readRaw, uuid, ROWING_SERVICE, CMD_CURVE } from "../decode.js";
 
 const fixture = name => JSON.parse(readFileSync(new URL(`./fixtures/${name}`, import.meta.url), "utf8"));
 
@@ -68,4 +68,20 @@ test("a stroke count that goes backwards marks a new piece and later strokes are
 test("uuid helper matches the Concept2 base", () => {
   assert.equal(ROWING_SERVICE, "ce060030-43e5-11e4-916c-0800200c9a66");
   assert.equal(uuid(0x43), "ce060043-43e5-11e4-916c-0800200c9a66");
+});
+
+test("curves fetched by command assemble from the raw log as the Python logger assembles them", () => {
+  // the synthetic sample with no 0x003D or 0x0043, its curves logged as command replies instead,
+  // and the edge cases make_fixtures.py lists (a curve of exactly 32 points, one cut off, junk replies, stuffed bytes)
+  const expected = fixture("command_session.json");
+  const { meta, events } = readRaw(readFileSync(new URL("./fixtures/command_row.jsonl", import.meta.url), "utf8"));
+  const session = new Session();
+  for (const [t, short, b] of events) session.feed(t, short, b);
+  const got = session.result(meta);
+  assert.equal(got.strokes.length, expected.strokes.length);
+  got.strokes.forEach((g, i) => assert.deepEqual(g[CMD_CURVE] ?? null, expected.strokes[i][CMD_CURVE] ?? null, `stroke ${g.stroke_count}`));
+  assert.equal(got.strokes.filter(s => CMD_CURVE in s).length, 65, "every stroke but the cut-off one");
+  assert.deepEqual(got.unmatched_curves, expected.unmatched_curves);
+  const sample = fixture("sample_session.json").strokes;
+  assert.deepEqual(got.strokes[0][CMD_CURVE], sample[0].force_curve, "the same points the 0x003D channel carried");
 });

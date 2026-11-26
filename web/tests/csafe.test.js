@@ -69,3 +69,18 @@ test("heart-rate monitor: the query, the answer and the pairing command", () => 
   const [f2, r2] = C.unframe(C.hrBeltPairFrame({ mfg: 1, type: 120, id: 0xf2000001 }));
   assert.equal(hex([f2, ...r2]).slice(-8), "f2000001");
 });
+
+test("the force-curve commands are the spec's \"Get Force Curve\" example, and its replies read as it says", () => {
+  // Concept2 PM CSAFE Communication Definition rev 0.36, pages 102-103
+  assert.equal(hex(C.strokeStateFrame()), "f11a01bfa4f2");
+  assert.equal(hex(C.forcePlotFrame(0x14)), "f11a036b011467f2");
+  assert.equal(hex(C.forcePlotFrame()), "f11a036b012053f2", "32 bytes, the most a read returns");
+  assert.deepEqual(C.curveReply(hx("F1 09 1A 03 BF 01 04 AA F2")), { state: 4 });
+  // the first force-plot reply, with its checksum (the spec prints xx) filled in
+  const body = [0x09, 0x1a, 0x23, 0x6b, 0x21, 0x14, 0x41, 0, 0x41, 0, 0x79, 0, 0xae, 0, 0xb8, 0, 0xb9, 0, 0xba, 0, 0xb9, 0, 0xb9, 0, 0xb6, 0, ...Array(12).fill(0)];
+  assert.deepEqual(C.curveReply(C.frame(body)), { bytes: 20, points: [0x41, 0x41, 0x79, 0xae, 0xb8, 0xb9, 0xba, 0xb9, 0xb9, 0xb6] });
+  assert.deepEqual(C.curveReply(C.frame([0x09, 0x1a, 0x23, 0x6b, 0x21, 0, ...Array(32).fill(0)])), { bytes: 0, points: [] }, "the monitor has no more");
+  assert.equal(C.curveReply(C.frame([0x15])), null, "a refusal carries no answer");
+  assert.equal(C.curveReply(hx("F1 81 76 02 01 13 E7 F2")), null, "nor does another command's reply");
+  assert.equal(C.curveReply(hx("F1 09 1A 03 BF 01 04 AB F2")), null, "nor a bad checksum");
+});

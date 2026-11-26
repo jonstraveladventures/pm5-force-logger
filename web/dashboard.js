@@ -1,7 +1,7 @@
 // The live dashboard: tiles, the force curve with its shape measures, trends and the stroke
 // table, fed through H (the event handlers): by the page's own Session when it holds the PM5,
 // or by the Python logger's server-sent events when the logger serves the page (logger-feed.js).
-import { trim, resample, metrics, smoothed, channelFor, CM_PER_POINT } from "./curve.js";
+import { trim, resample, metrics, smoothed, channelFor, noCurveText, CM_PER_POINT } from "./curve.js";
 export { trim, resample, metrics };
 export const S = { strokes: new Map(), status: {}, summary: {}, device: {}, splits: new Map(), hrSeen: null };   // hrSeen: the last heart rate and when
 // Characteristic 0x0043 is force against handle travel: each reading is 3.5/3 inches of the handle
@@ -129,14 +129,14 @@ function drawCurve() {
   if (hoverX != null && cur) { const i = Math.round(Math.max(0, Math.min(100, (hoverX - pad.l) / pw * 100))); g.strokeStyle = css("--ink3"); g.beginPath(); g.moveTo(X(i), pad.t); g.lineTo(X(i), pad.t + ph); g.stroke();
     const r = resample(trim(pts(cur))); const ref = reference();
     $("hover").textContent = `${i}% of drive${lenCm ? ` (${Math.round(i / 100 * lenCm)} cm)` : ""} · this stroke ${n0(r[i])} lbf · average ${avg ? n0(avg[i] * scale) : "—"} · reference ${ref ? n0(ref[i] * scale) : "—"}`; }
-  else $("hover").textContent = cur ? `stroke ${cur.stroke_count}: hover the chart to read values` : "waiting for the first stroke…";
+  else $("hover").textContent = cur ? `stroke ${cur.stroke_count}: hover the chart to read values` : noCurveText(S.strokes.values(), src());
 }
 $("curve").addEventListener("mousemove", e => { hoverX = e.offsetX; drawCurve(); });
 $("curve").addEventListener("mouseleave", () => { hoverX = null; drawCurve(); });
 
 function renderMetrics() {
   const list = strokesWithCurves(); const cur = list[list.length - 1]; const el = $("metrics");
-  if (!cur) { el.innerHTML = `<div class="note">Force-curve metrics appear after the first stroke.</div>`; return; }
+  if (!cur) { const why = noCurveText(S.strokes.values(), src()); el.innerHTML = `<div class="note">${why === "waiting for the first stroke…" ? "Force-curve metrics appear after the first stroke." : why[0].toUpperCase() + why.slice(1)}</div>`; return; }
   const m = metrics(pts(cur)); const series = list.map(s => metrics(pts(s))).filter(Boolean); const avg = meanCurve(series.map(x => x.norm));
   const ref = reference(), T = school(), B = bands(); const inRange = (v, t) => v >= t.lo && v <= t.hi;
   const flag = (v, t, lowWord, highWord) => !t ? "" : inRange(v, t) ? `<span class="flag ok">✓ in range</span>` : `<span class="flag off">▲ ${v > t.hi ? highWord : lowWord}</span>`;
@@ -165,19 +165,19 @@ function renderMetrics() {
 
 const TRENDS = [
   ["Peak force (lbf)", s => s.peak_force_lbf, null],
-  ["Peak position (% of drive)", s => metrics(pts(s))?.a100, () => school().a100],
-  ["Rectangle index (%)", s => metrics(pts(s))?.ram, () => school().ram],
+  ["Peak position (% of drive)", s => metrics(pts(s))?.a100, () => school().a100, true],   // true: read from the curve
+  ["Rectangle index (%)", s => metrics(pts(s))?.ram, () => school().ram, true],
   ["Drive length (m)", s => s.drive_length_m, null],
   ["Power (W)", s => s.power_w, null],
 ];
 $("trends").innerHTML = TRENDS.map((t, i) => `<div class="panel" id="trend${i}"><h2>${t[0]}${t[2] ? ` <span style="font-weight:400;color:var(--ink3)">· shaded: target</span>` : ""}</h2><canvas id="tr${i}"></canvas></div>`).join("");
 function drawTrends() {
   const list = [...S.strokes.values()].sort((a, b) => a.stroke_count - b.stroke_count);
-  TRENDS.forEach(([name, fn, bandFn], i) => { const band = bandFn ? bandFn() : null;
+  TRENDS.forEach(([name, fn, bandFn, fromCurve], i) => { const band = bandFn ? bandFn() : null;
     const c = $("tr" + i); const [g, w, h] = setupCanvas(c); const pad = { l: 34, r: 8, t: 6, b: 18 };
     const pts = list.map(s => [s.stroke_count, fn(s)]).filter(p => p[1] != null && !Number.isNaN(p[1]));
     g.fillStyle = css("--ink3"); g.font = canvasFont();
-    if (!pts.length) { g.fillText("no strokes yet", pad.l, h / 2); return; }
+    if (!pts.length) { g.fillText(list.length && fromCurve ? noCurveText(list, src()) : "no strokes yet", pad.l, h / 2); return; }
     let lo = Math.min(...pts.map(p => p[1])), hi = Math.max(...pts.map(p => p[1])); if (band) { lo = Math.min(lo, band.lo); hi = Math.max(hi, band.hi); }
     const span = hi - lo || 1; const floor0 = lo >= 0; lo -= span * .1; hi += span * .1; if (floor0) lo = Math.max(0, lo);
     const fmt = v => span < 5 ? v.toFixed(2) : span < 50 ? v.toFixed(1) : Math.round(v).toString();

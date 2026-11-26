@@ -99,7 +99,7 @@ python pm5_logger.py --reparse data/raw/<start>.jsonl       # rebuild a session 
 python pm5_logger.py --replay data/raw/<start>.jsonl        # replay a real session through the dashboard
 ```
 
-Keep your PM5's firmware up to date through ErgData. Concept2's March 2026 firmware added a new force-curve format over Bluetooth, and the May 2026 release fixed the monitor freezing while sending force-curve data.
+Keep your PM5's firmware up to date through ErgData. Concept2's March 2026 firmware added a new force-curve format over Bluetooth, and the May 2026 release fixed the monitor freezing while sending force-curve data. PM5s on Concept2's oldest firmware range (versions up to 39) didn't get either release, so they don't send the newer format.
 
 ## Program a workout
 
@@ -184,7 +184,7 @@ The dashboard also counts dips as the force rises and measures how far the shape
 Treat the targets as guides, not pass marks:
 
 - Kleshnev's figures come from boats on the water, where force was measured at the oarlock against oar angle. The PM5 measures force at the handle.
-- With the default channel, the chart's horizontal axis is handle travel: each reading is 3.5/3 inches (2.96 cm) of the handle moving away from the flywheel, as Concept2 describes the newer force channel, so peak position is a real distance into the stroke, and it is shown in centimetres as well as per cent. That is close to, though not the same as, Kleshnev's oar angle. The other channel is force against time, and on it peak position is a share of the drive's duration instead, which comes out a little different. A PM5 with firmware from before March 2026 sends only that channel, and the dashboard then draws it.
+- With the default channel, the chart's horizontal axis is handle travel: each reading is 3.5/3 inches (2.96 cm) of the handle moving away from the flywheel, as Concept2 describes the newer force channel, so peak position is a real distance into the stroke, and it is shown in centimetres as well as per cent. That is close to, though not the same as, Kleshnev's oar angle. The other channel is force against time, and on it peak position is a share of the drive's duration instead, which comes out a little different. A PM5 that sends only that channel has it drawn instead: one with firmware from before March 2026, or one on Concept2's oldest firmware range (versions up to 39), which didn't get the March 2026 release.
 - The default reference is a smooth shape built to meet the targets. It is not a measured elite curve.
 
 Comparing with yourself is more useful. After a row that felt right, press "Save average as my reference" and switch "Compare to" over to it. You can then watch whether your peak moves later as you tire, whether the rectangle index falls, whether a dip appears at the leg-to-back handover and how much your strokes vary over the session.

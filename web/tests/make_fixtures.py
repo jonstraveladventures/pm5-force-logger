@@ -32,6 +32,79 @@ def sample_session():
     return session.result(meta)
 
 
+def curve_frame(points, status=0x05):
+    """A reply to CSAFE_PM_GET_FORCEPLOTDATA as the spec's example lays it out: the 0x1A wrapper,
+    the command, 33 bytes (bytes read, then 32 bytes of points least significant byte first, zero
+    padded)."""
+    data = b"".join(le(v, 2) for v in points)
+    data += bytes(32 - len(data))
+    return W.frame(bytes([status, 0x1A, 35, 0x6B, 33, 2 * len(points)]) + data)
+
+
+def state_frame(state, status=0x05):
+    return W.frame(bytes([status, 0x1A, 3, 0xBF, 1, state]))
+
+
+def command_row():
+    """The sample row as a PM5 that sends no curve would give it to the browser version: no 0x003D
+    or 0x0043, and each 0x003D curve fetched by command instead, logged as the page logs it (uuid
+    0022: a stroke-state reply when the state changes, then the force-plot replies). Some strokes
+    carry the cases both decoders must agree on:
+      3: exactly 32 points, so two full reads and an empty one;
+      5: cut off after one full read by the next drive, so it gets no curve;
+      7: a reply with a bad checksum, a refusal with no responses, and another command's reply among its reads;
+      9: values 241 and 498, whose bytes need CSAFE stuffing."""
+    rows = [json.loads(line) for line in (ROOT / "examples" / "sample_row.jsonl").open()]
+    out, fc, n = [], L.ForceCurve(), 0
+    add = lambda t, raw: out.append({"t": round(t, 3), "uuid": "0022", "hex": raw.hex()})
+    for r in rows:
+        if r.get("uuid") == "0043":
+            continue
+        if r.get("uuid") != "003d":
+            out.append(r)
+            continue
+        curve = fc.add(bytes.fromhex(r["hex"]))
+        if not curve:
+            continue
+        n += 1
+        t = r["t"]
+        if n == 3:
+            curve = (curve + [5] * 32)[:32]
+        if n == 9:
+            curve = curve[:10] + [241, 498] + curve[12:]
+        add(t - 0.4, state_frame(2))
+        add(t + 0.04, state_frame(4))
+        reads = [curve[i:i + 16] for i in range(0, len(curve), 16)]
+        if len(curve) % 16 == 0:
+            reads.append([])
+        if n == 5:
+            reads = reads[:1]
+        k = 0
+        for k, pts in enumerate(reads):
+            if n == 7 and k == 1:
+                bad = bytearray(curve_frame(pts))
+                bad[-2] ^= 0x01
+                add(t + 0.07, bytes(bad))
+                add(t + 0.075, W.frame(bytes([0x15])))                   # a refusal: status only
+                add(t + 0.078, W.frame(bytes([0x05, 0x7E, 9, 0x57, 7, 0, 1, 120, 0x12, 0x34, 0x56, 0x78])))   # a heart-rate belt reply
+            add(t + 0.08 + 0.04 * k, curve_frame(pts))
+    out.sort(key=lambda r: r["t"])   # stable: the sample's own order is kept at equal times
+    return out
+
+
+def command_session():
+    meta, events = {}, []
+    for r in command_row():
+        if "device" in r:
+            meta["device"] = r["device"]
+        if "uuid" in r:
+            events.append((r["t"], int(r["uuid"], 16), bytes.fromhex(r["hex"])))
+    session = L.Session()
+    for t, short, b in events:
+        session.feed(t, short, b)
+    return session.result(meta)
+
+
 def packets():
     """Hand-built packets for every layout parse() knows, plus ones it must refuse."""
     cases = [
@@ -138,6 +211,8 @@ def vo2():
 if __name__ == "__main__":
     OUT.mkdir(exist_ok=True)
     (OUT / "sample_session.json").write_text(json.dumps(sample_session()))
+    (OUT / "command_row.jsonl").write_text("".join(json.dumps(r) + "\n" for r in command_row()))
+    (OUT / "command_session.json").write_text(json.dumps(command_session()))
     (OUT / "packets.json").write_text(json.dumps(packets(), indent=1))
     (OUT / "frames.json").write_text(json.dumps(frames(), indent=1))
     (OUT / "vo2.json").write_text(json.dumps(vo2()))

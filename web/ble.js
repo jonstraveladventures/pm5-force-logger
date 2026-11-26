@@ -3,7 +3,7 @@
 // characteristic on the rowing service, read the device information, and write CSAFE frames
 // to the control service in 20-byte pieces with the reply collected from its notifications.
 import { uuid, ADVERTISED_SERVICE, DEVICE_INFO_SERVICE, CONTROL_SERVICE, ROWING_SERVICE, DEVICE_INFO } from "./decode.js";
-import { PM_RECEIVE, PM_TRANSMIT, CHUNK, STOP_FLAG, unframe } from "./csafe.js";
+import { PM_RECEIVE, PM_TRANSMIT, CHUNK, STOP_FLAG, unframe, strokeStateFrame, forcePlotFrame, curveReply, FORCEPLOT_BLOCK, STROKE_RECOVERY } from "./csafe.js";
 
 export const supported = () => typeof navigator !== "undefined" && !!navigator.bluetooth;
 
@@ -57,17 +57,18 @@ export async function connect({ onNotify, onDisconnect, log = () => {} }) {
   // empty the reply buffer and take the first one's reply (the monitor check on connecting and a
   // workout sent straight after it, say)
   let queue = Promise.resolve();
-  pm.send = (frame, timeoutMs = 3000) => {
-    const run = queue.then(() => send(pm, frame, timeoutMs));
+  pm.request = (frame, timeoutMs = 3000) => {   // the reply frame as it came
+    const run = queue.then(() => exchange(pm, frame, timeoutMs));
     queue = run.catch(() => {});
     return run;
   };
+  pm.send = async (frame, timeoutMs) => unframe(await pm.request(frame, timeoutMs));   // [status, responses]
   log(`subscribed: ${pm.subscribed.map(s => s.toString(16).padStart(4, "0")).join(" ")}`);
   return pm;
 }
 
-/** Write one CSAFE frame to the PM5 and return [status, responses] from its reply. */
-async function send(pm, data, timeoutMs) {
+/** Write one CSAFE frame to the PM5 and return its reply frame. */
+async function exchange(pm, data, timeoutMs) {
   const c = pm.control;
   if (!c) throw new Error("this PM5 offers no control service, so a workout can't be programmed from here");
   let reply;
@@ -77,10 +78,12 @@ async function send(pm, data, timeoutMs) {
       setTimeout(() => { if (c.pending === resolve) { c.pending = null; reject(new Error(`no reply from the PM5 within ${timeoutMs / 1000} s`)); } }, timeoutMs);
     });
   }
-  for (let i = 0; i < data.length; i += CHUNK) {
-    const chunk = data.slice(i, i + CHUNK);
-    if (c.rx.writeValueWithResponse) await c.rx.writeValueWithResponse(chunk); else await c.rx.writeValue(chunk);
-  }
+  try {
+    for (let i = 0; i < data.length; i += CHUNK) {
+      const chunk = data.slice(i, i + CHUNK);
+      if (c.rx.writeValueWithResponse) await c.rx.writeValueWithResponse(chunk); else await c.rx.writeValue(chunk);
+    }
+  } catch (e) { c.pending = null; throw e; }   // the write failed (the PM5 gone): no reply to wait for
   if (!c.notifies) {   // older firmware: the reply is read back from the characteristic
     const deadline = Date.now() + timeoutMs;
     let got = new Uint8Array();
@@ -89,7 +92,53 @@ async function send(pm, data, timeoutMs) {
       got = copy(await c.tx.readValue());
       if (got.length && got[got.length - 1] === STOP_FLAG) break;
     }
-    return unframe(got);
+    return got;
   }
-  return unframe(await reply);
+  return reply;
+}
+
+/** Fetch each stroke's force curve by command, for a PM5 that doesn't send it (Concept2's "Get
+ *  Force Curve" example, spec rev 0.36): ask for the stroke state every `pollMs`; when the stroke
+ *  enters recovery, read the force-plot data until a read comes back short. Every request goes
+ *  through the queue above, so a workout or the heart-rate pairing waits at most one request.
+ *  onReply(t, frame) gets each force-plot reply and each stroke-state reply that differs from the
+ *  last: the page logs them (uuid 0022) and its Session turns them into force_curve_cmd. If the
+ *  PM5 leaves `giveUpAfter` stroke-state requests running unanswered, it stops and says so through
+ *  onNote(t, text). Returns {stop(), finished}; it also stops when the PM5 disconnects. */
+export function fetchCurves(pm, { onReply, onNote = () => {}, pollMs = 100, timeoutMs = 1000, giveUpAfter = 5, maxReads = 16, now = () => Date.now() / 1000 } = {}) {
+  let running = true;
+  const ask = async frame => { try { const raw = await pm.request(frame, timeoutMs); return [raw, curveReply(raw)]; } catch { return [null, null]; } };
+  const finished = (async () => {
+    let last = null, read = false, misses = 0;
+    while (running && pm.connected) {
+      const [raw, r] = await ask(strokeStateFrame());
+      if (!running) break;
+      if (!r || !("state" in r)) {
+        if (++misses >= giveUpAfter) {
+          onNote(now(), `stopped asking for force curves: no answer to ${misses} stroke-state requests running`);
+          return "no answer";
+        }
+      } else {
+        misses = 0;
+        if (r.state !== last) { onReply(now(), raw); last = r.state; }
+        if (r.state !== STROKE_RECOVERY) read = false;
+        else if (!read) {   // once per recovery
+          read = true;
+          // after a read that gets no good reply, the rest is still read off, so that it doesn't
+          // open the next stroke's curve, but not passed on: the curve would have a gap, and the
+          // Session drops a curve that never got its short read
+          let lost = 0;
+          for (let k = 0; k < maxReads && running; k++) {
+            const [raw2, r2] = await ask(forcePlotFrame());
+            if (!r2 || !("bytes" in r2)) { if (++lost >= 2) break; continue; }
+            if (!lost) onReply(now(), raw2);
+            if (r2.bytes < FORCEPLOT_BLOCK) break;
+          }
+        }
+      }
+      await sleep(pollMs);
+    }
+    return "stopped";
+  })();
+  return { stop() { running = false; return finished; }, finished };
 }

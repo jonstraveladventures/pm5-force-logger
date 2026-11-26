@@ -6,13 +6,29 @@
 export const CM_PER_POINT = 3.5 / 3 * 2.54;
 
 export function trim(p) { if (!p || p.length < 3) return null; let a = 0, b = p.length - 1; while (a < b && p[a] <= 0) a++; while (b > a && p[b] <= 0) b--; return b - a >= 2 ? p.slice(a, b + 1) : null; }
+/** The force-curve channels, newest first: force against handle travel (0x0043), force against
+ *  time (0x003D), and force against time fetched by command (0x6B, for a PM5 that sends neither). */
+export const CHANNELS = ["force_curve_v2", "force_curve", "force_curve_cmd"];
+/** A stroke's curve on the newest channel that has one, or undefined. */
+export const firstCurve = s => s[CHANNELS.find(k => trim(s[k]))];
 /** The force-curve channel to draw for these strokes: force against handle travel (0x0043),
  *  unless at least two strokes carry force against time (0x003D) and none carries 0x0043, as from a
- *  PM5 whose firmware predates March 2026. Two, because 0x0043 arrives just after 0x003D. */
+ *  PM5 whose firmware predates March 2026. Two, because 0x0043 arrives just after 0x003D. A curve
+ *  fetched by command comes after both, so one is enough when neither has come. */
 export function channelFor(strokes) {
-  let older = 0;
-  for (const s of strokes) { if (trim(s.force_curve_v2)) return "force_curve_v2"; if (trim(s.force_curve)) older++; }
-  return older >= 2 ? "force_curve" : "force_curve_v2";
+  let older = 0, cmd = 0;
+  for (const s of strokes) { if (trim(s.force_curve_v2)) return "force_curve_v2"; if (trim(s.force_curve)) older++; if (trim(s.force_curve_cmd)) cmd++; }
+  return older >= 2 ? "force_curve" : cmd && !older ? "force_curve_cmd" : "force_curve_v2";
+}
+/** Strokes with no curve on any channel after which the page says the PM5 isn't sending them. */
+export const NO_CURVES_AFTER = 4;
+/** What to show where `key`'s curve would be, or null when a stroke has one. */
+export function noCurveText(strokes, key) {
+  let n = 0, any = false;
+  for (const s of strokes) { if (trim(s[key])) return null; n++; if (firstCurve(s)) any = true; }
+  if (!n) return "waiting for the first stroke…";
+  if (any) return "no curves on this channel: choose another in the Curve menu";
+  return n >= NO_CURVES_AFTER ? "this PM5 isn't sending force curves" : "waiting for the first force curve…";
 }
 export function resample(p, n = 101) { const m = p.length; return Array.from({ length: n }, (_, i) => { const x = i * (m - 1) / (n - 1), j = Math.floor(x), f = x - j; return j + 1 < m ? p[j] * (1 - f) + p[j + 1] * f : p[m - 1]; }); }
 

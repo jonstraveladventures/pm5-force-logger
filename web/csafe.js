@@ -18,8 +18,7 @@ const WT = { just_row_nosplits: 0, just_row: 1, distance_nosplits: 2, distance: 
 const IT = { time: 0, distance: 1, rest: 2, time_undefined_rest: 3, distance_undefined_rest: 4, undefined_rest: 5, calorie: 6, calorie_undefined_rest: 7 };
 const SCREEN_WORKOUT = 1, PREPARE_TO_ROW = 1, TERMINATE_WORKOUT = 2;
 export const MAX_INTERVALS = 50;
-const STATE = { 0: "error", 1: "ready", 2: "idle", 3: "have id", 5: "in use", 6: "pause", 7: "finish", 8: "manual", 9: "off line" };
-const PREV = { 0x00: "ok", 0x10: "rejected", 0x20: "bad", 0x30: "not ready" };
+const STATE = { 0: "error", 1: "ready", 2: "idle", 3: "have id", 5: "in use", 6: "pause", 7: "finish", 8: "manual", 9: "off line" };const PREV = { 0x00: "ok", 0x10: "rejected", 0x20: "bad", 0x30: "not ready" };
 
 export const STOP_FLAG = STOP;
 
@@ -191,6 +190,40 @@ export function parseHrBelt(resp) {
 }
 
 export const hrBeltPairFrame = ({ user = 0, mfg, type, id }) => frame(wrapIn(SETPMDATA, longCmd(SET_EXT_HRBELT, [user, mfg, type, ...idBytes(id)])));
+
+// ---------------------------------------------------------------------------- the force curve by command
+// Spec rev 0.36, "Get Force Curve": poll CSAFE_PM_GET_STROKESTATE (0xBF) until the stroke is in
+// recovery, then read CSAFE_PM_GET_FORCEPLOTDATA (0x6B) until the monitor has no more. Both go in
+// the PM-specific wrapper CSAFE_SETUSERCFG1_CMD (0x1A), as the example sends them. A read asks for
+// up to 32 bytes; the reply always carries 33, the first saying how many of the rest are points,
+// each least significant byte first (the example's order, and the Bluetooth curve channels').
+// The monitor returns only what it recorded since the last read, so a read that comes back short
+// is the end of the curve. pm5_logger.py's curve_reply() reads these replies the same way.
+const USERCFG1 = 0x1a, GET_STROKESTATE = 0xbf, GET_FORCEPLOTDATA = 0x6b;
+export const FORCEPLOT_BLOCK = 32;
+export const STROKE_RECOVERY = 4;   // the stroke states: 0 waiting for the wheel to slow, 1 waiting for it to speed up, 2 driving, 3 dwelling after the drive, 4 recovery
+
+export const strokeStateFrame = () => frame([USERCFG1, 1, GET_STROKESTATE]);
+export const forcePlotFrame = (bytes = FORCEPLOT_BLOCK) => frame([USERCFG1, 3, GET_FORCEPLOTDATA, 1, bytes]);
+
+/** What a reply frame to those two commands says: {state} or {bytes, points}; null for anything
+ *  else (a bad frame, a refusal, another command's reply). */
+export function curveReply(raw) {
+  let resp;
+  try { [, resp] = unframe(raw); } catch { return null; }
+  if (resp[0] !== USERCFG1 || resp.length < 2) return null;
+  const inner = resp.slice(2, 2 + resp[1]);
+  for (let i = 0; i + 1 < inner.length; i += 2 + inner[i + 1]) {
+    const cmd = inner[i], data = inner.slice(i + 2, i + 2 + inner[i + 1]);
+    if (cmd === GET_STROKESTATE && data.length >= 1) return { state: data[0] };
+    if (cmd === GET_FORCEPLOTDATA && data.length >= 1) {
+      const bytes = Math.min(data[0], FORCEPLOT_BLOCK, data.length - 1) & ~1, points = [];
+      for (let k = 1; k < 1 + bytes; k += 2) points.push(data[k] | (data[k + 1] << 8));
+      return { bytes: data[0], points };
+    }
+  }
+  return null;
+}
 
 // ---------------------------------------------------------------------------- the mini-syntax
 

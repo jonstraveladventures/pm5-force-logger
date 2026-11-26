@@ -54,6 +54,11 @@ export class Recorder {
     return {};
   }
 
+  /** A line for the raw log alone (what the force-curve commands did, say); a decoder skips it. */
+  note(t, fields) {
+    if (this.session) this.raw.push({ t: Math.round(t * 1000) / 1000, ...fields });
+  }
+
   /** The programmed piece changed: kept for this piece and the ones after it. */
   setWorkout(desc, t = Date.now() / 1000) {
     this.workout = desc || undefined;
